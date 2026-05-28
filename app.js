@@ -31,6 +31,8 @@ const state = {
     fetchedAt: 0,
     /** 백그라운드 갱신 중 표시용 */
     refreshing: false,
+    /** PWA 설치 프롬프트 (Chrome 이 띄울 준비됐을 때만 set) */
+    installPrompt: null,
 };
 
 // ─── DOM 헬퍼 ────────────────────────────────────────────────────────
@@ -403,6 +405,41 @@ function escapeHtml(s) {
     }[c]));
 }
 
+// ─── PWA 설치 프롬프트 ──────────────────────────────────────────────
+// Chrome (안드로이드/데스크톱) 은 PWA 가 설치 가능할 때 `beforeinstallprompt` 를 발화시킴.
+// 우리는 그 이벤트를 *낚아채서 보관* 했다가 사용자가 버튼을 누를 때 prompt() 호출.
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    state.installPrompt = e;
+    const btn = $('btn-install');
+    if (btn) btn.style.display = "";
+});
+window.addEventListener('appinstalled', () => {
+    state.installPrompt = null;
+    const btn = $('btn-install');
+    if (btn) btn.style.display = "none";
+});
+
+async function tryInstall() {
+    if (!state.installPrompt) {
+        // 안드로이드 Chrome 이 자동으로 안 띄웠거나, 이미 설치됨, 또는 지원 안 함
+        alert(
+            "설치 가능 상태가 아닙니다.\n\n" +
+            "확인사항:\n" +
+            "  • Chrome 메뉴(⋮) → '앱 설치' 가 있는지 보세요.\n" +
+            "  • 이미 설치돼 있을 수도 있습니다.\n" +
+            "  • iOS Safari 는 '공유 → 홈 화면에 추가' 로 설치하세요."
+        );
+        return;
+    }
+    state.installPrompt.prompt();
+    const result = await state.installPrompt.userChoice;
+    if (result?.outcome === 'accepted') {
+        state.installPrompt = null;
+        $('btn-install').style.display = "none";
+    }
+}
+
 // ─── 이벤트 바인딩 ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     show('screen-auth');
@@ -416,6 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.accessToken) loadDocuments();
         else requestSignIn();
     });
+    $('btn-install').addEventListener('click', tryInstall);
 
     // 검색 — 입력하는 동안 즉시 필터링
     const searchInput = $('search-input');
