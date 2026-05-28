@@ -32,6 +32,32 @@ html, body { margin: 0; padding: 0; font-family: -apple-system, 'Malgun Gothic',
 .action-btn:active { background: #a98050; }
 .hint { color: #888; font-size: 13px; margin-top: 12px; }
 
+.search-row {
+    position: sticky; top: 56px; z-index: 5;
+    display: flex; align-items: center; gap: 6px;
+    background: #fdfbf7; padding: 8px 0;
+}
+.search-row input[type="search"] {
+    flex: 1; padding: 10px 14px;
+    border: 1px solid #d8d2c2; border-radius: 22px;
+    font-size: 15px; background: #fff;
+    -webkit-appearance: none; appearance: none;
+}
+.search-row input[type="search"]:focus { outline: 2px solid #c19a6b; border-color: #c19a6b; }
+.search-row .iconbtn {
+    color: #888; background: #f0eadd; border-radius: 50%;
+    width: 32px; height: 32px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+}
+
+.cache-badge {
+    display: inline-block;
+    background: #fef3e7; color: #5d4037;
+    border: 1px dashed #c19a6b; border-radius: 12px;
+    padding: 2px 8px; font-size: 11px; margin-left: 6px;
+}
+
 .subject-group { margin-bottom: 20px; }
 .subject-group > h3 {
     color: #1b263b; font-size: 16px;

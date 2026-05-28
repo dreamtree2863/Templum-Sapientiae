@@ -14,13 +14,23 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 // 읽기 전용 권한만 — 다른 Drive 파일에는 접근 불가
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
+// 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
+const CACHE_KEY = "templum.docList.v1";
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
+
 // 상태
 const state = {
     accessToken: null,
     tokenClient: null,
     rootFolderId: null,
-    /** { subject: [{id, name, mtime, kind, baseTitle, group}, ...] } */
+    /** { subject: { baseTitle: {subject, baseTitle, files:{kind:file}, latestMtime} } } */
     grouped: {},
+    /** 검색 필터 (소문자) */
+    searchTerm: "",
+    /** 마지막 캐시 시각 (Date.now()) */
+    fetchedAt: 0,
+    /** 백그라운드 갱신 중 표시용 */
+    refreshing: false,
 };
 
 // ─── DOM 헬퍼 ────────────────────────────────────────────────────────
@@ -68,17 +78,70 @@ function requestSignIn() {
 
 async function onSignedIn() {
     show('screen-list');
-    setStatus("Drive 폴더 검색 중…");
+
+    // 1) 캐시가 있으면 *즉시* 표시 (UX 우선)
+    const cached = loadCache();
+    if (cached) {
+        state.grouped = cached.grouped;
+        state.fetchedAt = cached.fetchedAt;
+        renderList();
+        setStatus(
+            `📦 캐시에서 즉시 표시 (총 ${cached.totalFiles}개 파일, ${fmtTimeSince(cached.fetchedAt)} 전 동기화) — 백그라운드 새로고침 중…`
+        );
+    } else {
+        setStatus("Drive 폴더 검색 중…");
+    }
+
+    // 2) 백그라운드에서 최신 가져옴
     try {
-        state.rootFolderId = await findFolderByName(DRIVE_ROOT_NAME);
+        if (!state.rootFolderId) {
+            state.rootFolderId = await findFolderByName(DRIVE_ROOT_NAME);
+        }
         if (!state.rootFolderId) {
             setStatus(`Drive 에서 "${DRIVE_ROOT_NAME}" 폴더를 찾을 수 없습니다. PC 의 Google Drive 데스크톱이 동기화 중인지 확인하세요.`);
             return;
         }
-        await loadDocuments();
+        await loadDocuments(/* hasCache */ !!cached);
     } catch (e) {
-        setStatus("오류: " + e.message);
+        if (!cached) setStatus("오류: " + e.message);
+        else setStatus(`📦 캐시 표시 중 — 갱신 실패: ${e.message}`);
     }
+}
+
+// ─── 캐시 helpers ────────────────────────────────────────────────────
+function loadCache() {
+    try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || !data.grouped) return null;
+        return data;
+    } catch (_) { return null; }
+}
+
+function saveCache() {
+    try {
+        const totalFiles = Object.values(state.grouped).reduce(
+            (sum, items) => sum + Object.values(items).reduce(
+                (s, it) => s + Object.keys(it.files).length, 0), 0);
+        const payload = {
+            grouped: state.grouped,
+            fetchedAt: state.fetchedAt,
+            totalFiles,
+        };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    } catch (_) { /* 용량 초과 등 — 조용히 무시 */ }
+}
+
+function fmtTimeSince(ts) {
+    if (!ts) return "?";
+    const diff = Date.now() - ts;
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return "방금";
+    if (min < 60) return `${min}분`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}시간`;
+    return `${Math.floor(hr / 24)}일`;
 }
 
 // ─── Drive API ───────────────────────────────────────────────────────
@@ -103,9 +166,9 @@ async function findFolderByName(name, parentId) {
     return res.files?.[0]?.id || null;
 }
 
-async function listAllFilesUnder(folderId) {
-    /** 하위 폴더까지 재귀로 HTML 파일 전부 수집. 깊이 제한은 별로 없음. */
-    const out = [];
+async function listAllFilesUnder(folderId, onBatch) {
+    /** 하위 폴더까지 재귀로 HTML 파일 전부 수집.
+        onBatch(batch[]) 콜백이 있으면 각 폴더 페이지를 받을 때마다 호출 — 점진적 렌더링. */
     const stack = [{ id: folderId, path: [] }];
     while (stack.length) {
         const { id, path } = stack.pop();
@@ -118,11 +181,12 @@ async function listAllFilesUnder(folderId) {
             };
             if (pageToken) params.pageToken = pageToken;
             const res = await driveFetch("files", params);
+            const batch = [];
             for (const f of (res.files || [])) {
                 if (f.mimeType === "application/vnd.google-apps.folder") {
                     stack.push({ id: f.id, path: [...path, f.name] });
                 } else if (/\.html?$/i.test(f.name)) {
-                    out.push({
+                    batch.push({
                         id: f.id,
                         name: f.name,
                         mtime: Date.parse(f.modifiedTime),
@@ -131,10 +195,10 @@ async function listAllFilesUnder(folderId) {
                     });
                 }
             }
+            if (batch.length && onBatch) onBatch(batch);
             pageToken = res.nextPageToken;
         } while (pageToken);
     }
-    return out;
 }
 
 // ─── 항목 정규화 (suffix → kind 매핑) ──────────────────────────────
@@ -168,31 +232,44 @@ function classify(file) {
     return { kind: "plain", label: "열기", baseTitle: file.name.replace(/\.html?$/i, "") };
 }
 
-async function loadDocuments() {
-    setStatus("문서 목록 로드 중…");
-    const files = await listAllFilesUnder(state.rootFolderId);
-    setStatus(`총 ${files.length}개 HTML 파일 발견`);
+async function loadDocuments(hasCache = false) {
+    state.refreshing = true;
+    if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
 
-    // 항목 그룹화 — { subject: { baseTitle: { kind→file, group, latestMtime } } }
-    const groups = {};  // subject → baseTitle → item
-    for (const f of files) {
-        const info = classify(f);
-        // subject = path 첫 세그먼트 (예: "archive/국제법" → "국제법", "encyclopedia/학문/..." → "백과사전")
-        const segs = f.path.split("/").filter(Boolean);
-        let subject = "기타";
-        if (segs[0] === "archive" && segs[1]) subject = segs[1];
-        else if (segs[0] === "encyclopedia") subject = "백과사전";
-        else if (segs[0]) subject = segs[0];
+    // 점진적 수집 — 폴더 받을 때마다 그룹화 + 부분 렌더
+    const groups = {};
+    let totalSoFar = 0;
+    await listAllFilesUnder(state.rootFolderId, (batch) => {
+        for (const f of batch) {
+            const info = classify(f);
+            const segs = f.path.split("/").filter(Boolean);
+            let subject = "기타";
+            if (segs[0] === "archive" && segs[1]) subject = segs[1];
+            else if (segs[0] === "encyclopedia") subject = "백과사전";
+            else if (segs[0]) subject = segs[0];
 
-        groups[subject] = groups[subject] || {};
-        const item = groups[subject][info.baseTitle] = groups[subject][info.baseTitle] || {
-            subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0,
-        };
-        item.files[info.kind] = { ...f, label: info.label };
-        if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
-    }
+            groups[subject] = groups[subject] || {};
+            const item = groups[subject][info.baseTitle] = groups[subject][info.baseTitle] || {
+                subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0,
+            };
+            item.files[info.kind] = { id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label };
+            if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
+        }
+        totalSoFar += batch.length;
+        // 캐시 없을 때만 점진적 표시 (캐시가 있으면 끝까지 받고 한 번에 교체 — 화면 깜빡임 방지)
+        if (!hasCache) {
+            state.grouped = groups;
+            renderList();
+            setStatus(`📥 동기화 중… ${totalSoFar}개 수집됨`);
+        }
+    });
+
     state.grouped = groups;
+    state.fetchedAt = Date.now();
+    state.refreshing = false;
+    saveCache();
     renderList();
+    setStatus(`✅ ${totalSoFar}개 파일 동기화 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
 }
 
 // ─── 렌더링 ─────────────────────────────────────────────────────────
@@ -206,20 +283,33 @@ function renderList() {
         return;
     }
 
+    const term = state.searchTerm.trim().toLowerCase();
+    let totalShown = 0;
+
     for (const subject of subjects) {
+        const items = Object.values(state.grouped[subject])
+            .filter(it => !term
+                || it.baseTitle.toLowerCase().includes(term)
+                || subject.toLowerCase().includes(term))
+            .sort((a, b) => a.baseTitle.localeCompare(b.baseTitle, 'ko'));
+
+        if (items.length === 0) continue;
+
         const grp = document.createElement('div');
         grp.className = "subject-group";
         const h = document.createElement('h3');
-        h.textContent = `📚 ${subject}`;
+        h.textContent = `📚 ${subject} (${items.length})`;
         grp.appendChild(h);
-
-        const items = Object.values(state.grouped[subject])
-            .sort((a, b) => a.baseTitle.localeCompare(b.baseTitle, 'ko'));
 
         for (const item of items) {
             grp.appendChild(buildItemCard(item));
+            totalShown++;
         }
         container.appendChild(grp);
+    }
+
+    if (totalShown === 0 && term) {
+        container.innerHTML = `<div class="hint">"${escapeHtml(term)}" 와 일치하는 문서가 없습니다.</div>`;
     }
 }
 
@@ -326,4 +416,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.accessToken) loadDocuments();
         else requestSignIn();
     });
+
+    // 검색 — 입력하는 동안 즉시 필터링
+    const searchInput = $('search-input');
+    const clearBtn = $('btn-clear-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            state.searchTerm = searchInput.value || "";
+            clearBtn.style.display = state.searchTerm ? "" : "none";
+            renderList();
+        });
+    }
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            searchInput.value = "";
+            state.searchTerm = "";
+            clearBtn.style.display = "none";
+            renderList();
+            searchInput.focus();
+        });
+    }
 });
