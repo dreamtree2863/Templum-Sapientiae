@@ -24,8 +24,12 @@ const state = {
     accessToken: null,
     tokenClient: null,
     rootFolderId: null,
-    /** { subject: { baseTitle: {subject, baseTitle, files:{kind:file}, latestMtime} } } */
+    /** archive: { subject: { groupKey: {subject, baseTitle, files:{kind:file}, latestMtime} } } */
     grouped: {},
+    /** encyclopedia: 폴더 트리 { folders:{ name: subtree }, files:[{...}] } */
+    encyclopediaTree: { folders: {}, files: [] },
+    /** 펼쳐진 폴더 경로 (예: "경제학", "경제학/거시경제학") — 화면 새로고침 후에도 유지 */
+    expanded: new Set(),
     /** 검색 필터 (소문자) */
     searchTerm: "",
     /** 마지막 캐시 시각 (Date.now()) */
@@ -139,6 +143,7 @@ async function onSignedIn() {
     const cached = loadCache();
     if (cached) {
         state.grouped = cached.grouped;
+        state.encyclopediaTree = cached.encyclopediaTree || { folders: {}, files: [] };
         state.fetchedAt = cached.fetchedAt;
         renderList();
         setStatus(
@@ -182,6 +187,7 @@ function saveCache() {
                 (s, it) => s + Object.keys(it.files).length, 0), 0);
         const payload = {
             grouped: state.grouped,
+            encyclopediaTree: state.encyclopediaTree,
             fetchedAt: state.fetchedAt,
             totalFiles,
         };
@@ -300,49 +306,50 @@ async function loadDocuments(hasCache = false) {
     if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
 
     // 점진적 수집 — 폴더 받을 때마다 그룹화 + 부분 렌더
-    const groups = {};
+    const groups = {};                                  // archive: subject → groupKey → item
+    const encTree = { folders: {}, files: [] };         // encyclopedia: 폴더 트리
     let totalSoFar = 0;
+
     await listAllFilesUnder(state.rootFolderId, (batch) => {
         for (const f of batch) {
             const info = classify(f);
             const segs = f.path.split("/").filter(Boolean);
 
-            // subject 결정:
-            //   · archive/<subject>/...  →  <subject> 폴더명
-            //   · encyclopedia/<a>/<b>/.../file.html  →  가장 가까운 상위 폴더 (deepest)
-            //   · 그 외 → 첫 세그먼트
-            let subject = "기타";
-            if (segs[0] === "archive" && segs[1]) {
-                subject = segs[1];
-            } else if (segs[0] === "encyclopedia") {
-                // encyclopedia 하위 *최하위 폴더* 이름을 subject 로 — 깊은 분류 보존
-                const inner = segs.slice(1).filter(Boolean);
-                subject = inner.length > 0 ? `📖 ${inner[inner.length - 1]}` : "📖 백과사전";
-            } else if (segs[0]) {
-                subject = segs[0];
+            if (segs[0] === "encyclopedia") {
+                // encyclopedia 는 *폴더 트리* 로 — 깊은 계층 그대로 보존
+                const folderSegs = segs.slice(1);  // "encyclopedia" 제외
+                addFileToTree(encTree, folderSegs, {
+                    id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path,
+                    baseTitle: info.baseTitle, kind: info.kind, label: info.label,
+                });
+            } else {
+                // archive (및 그 외) 는 기존처럼 *주제별 그룹화*
+                let subject = "기타";
+                if (segs[0] === "archive" && segs[1]) subject = segs[1];
+                else if (segs[0]) subject = segs[0];
+
+                const groupKey = `${f.path}|${info.baseTitle}`;
+                groups[subject] = groups[subject] || {};
+                const item = groups[subject][groupKey] = groups[subject][groupKey] || {
+                    subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
+                };
+                item.files[info.kind] = {
+                    id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label,
+                };
+                if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
             }
-
-            // 그룹 키: *경로 + baseTitle* — 같은 baseTitle 이지만 다른 폴더면 별도 항목.
-            //   같은 폴더 안의 archive 접미사 형제들 (문제/요약본/종합 등) 은 같은 키로 묶여 *버튼 셋* 으로.
-            const groupKey = `${f.path}|${info.baseTitle}`;
-
-            groups[subject] = groups[subject] || {};
-            const item = groups[subject][groupKey] = groups[subject][groupKey] || {
-                subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
-            };
-            item.files[info.kind] = { id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label };
-            if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
         }
         totalSoFar += batch.length;
-        // 캐시 없을 때만 점진적 표시 (캐시가 있으면 끝까지 받고 한 번에 교체 — 화면 깜빡임 방지)
         if (!hasCache) {
             state.grouped = groups;
+            state.encyclopediaTree = encTree;
             renderList();
             setStatus(`📥 동기화 중… ${totalSoFar}개 수집됨`);
         }
     });
 
     state.grouped = groups;
+    state.encyclopediaTree = encTree;
     state.fetchedAt = Date.now();
     state.refreshing = false;
     saveCache();
@@ -350,20 +357,29 @@ async function loadDocuments(hasCache = false) {
     setStatus(`✅ ${totalSoFar}개 파일 동기화 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
 }
 
+// encyclopedia 트리에 파일 추가 — 폴더 세그먼트 따라 재귀로 들어가며 노드 생성
+function addFileToTree(node, folderSegs, file) {
+    if (folderSegs.length === 0) {
+        node.files.push(file);
+        return;
+    }
+    const [head, ...rest] = folderSegs;
+    if (!node.folders[head]) {
+        node.folders[head] = { folders: {}, files: [] };
+    }
+    addFileToTree(node.folders[head], rest, file);
+}
+
 // ─── 렌더링 ─────────────────────────────────────────────────────────
 function renderList() {
     const container = $('item-list');
     container.innerHTML = "";
 
-    const subjects = Object.keys(state.grouped).sort();
-    if (subjects.length === 0) {
-        container.innerHTML = `<div class="hint">동기화된 문서가 없습니다. PC 에서 archive/encyclopedia 폴더가 Drive 의 Templum 안에 들어 있는지 확인하세요.</div>`;
-        return;
-    }
-
     const term = state.searchTerm.trim().toLowerCase();
     let totalShown = 0;
 
+    // ── 1. archive 그룹 (시험·문제·요약본 등) ──
+    const subjects = Object.keys(state.grouped).sort();
     for (const subject of subjects) {
         const items = Object.values(state.grouped[subject])
             .filter(it => !term
@@ -386,9 +402,113 @@ function renderList() {
         container.appendChild(grp);
     }
 
-    if (totalShown === 0 && term) {
-        container.innerHTML = `<div class="hint">"${escapeHtml(term)}" 와 일치하는 문서가 없습니다.</div>`;
+    // ── 2. encyclopedia 트리 (인라인 아코디언) ──
+    const encTree = state.encyclopediaTree;
+    const hasEnc = !!encTree && (Object.keys(encTree.folders).length || encTree.files.length);
+    if (hasEnc) {
+        const encShown = countTreeMatches(encTree, term);
+        if (encShown > 0) {
+            const encGrp = document.createElement('div');
+            encGrp.className = "subject-group";
+            const encH = document.createElement('h3');
+            encH.textContent = `📖 백과사전 (${encShown})`;
+            encGrp.appendChild(encH);
+            // 루트 폴더의 자식들 직접 렌더 (루트 폴더 자체는 토글 없음)
+            renderTreeChildren(encGrp, encTree, "", 0, term);
+            container.appendChild(encGrp);
+            totalShown += encShown;
+        }
     }
+
+    if (totalShown === 0) {
+        container.innerHTML = term
+            ? `<div class="hint">"${escapeHtml(term)}" 와 일치하는 문서가 없습니다.</div>`
+            : `<div class="hint">동기화된 문서가 없습니다. PC 에서 archive/encyclopedia 폴더가 Drive 의 Templum 안에 들어 있는지 확인하세요.</div>`;
+    }
+}
+
+// 트리 노드 안의 *매칭되는* 파일 개수 (검색어 적용)
+function countTreeMatches(node, term) {
+    let n = 0;
+    for (const f of (node.files || [])) {
+        if (!term || f.baseTitle.toLowerCase().includes(term) || f.name.toLowerCase().includes(term)) n++;
+    }
+    for (const [folderName, subnode] of Object.entries(node.folders || {})) {
+        // 폴더 이름 자체가 매칭되면 그 안 *전체* 카운트
+        if (term && folderName.toLowerCase().includes(term)) {
+            n += countTreeMatches(subnode, "");  // 검색어 없이 전체 카운트
+        } else {
+            n += countTreeMatches(subnode, term);
+        }
+    }
+    return n;
+}
+
+// 폴더 노드의 자식들을 부모 컨테이너에 *직접* 추가 (들여쓰기 깊이 = depth)
+function renderTreeChildren(parentEl, node, pathPrefix, depth, term) {
+    // 폴더 먼저 (이름 순)
+    const folderNames = Object.keys(node.folders).sort((a, b) => a.localeCompare(b, 'ko'));
+    for (const name of folderNames) {
+        const subnode = node.folders[name];
+        const fullPath = pathPrefix ? `${pathPrefix}/${name}` : name;
+        // 검색어 적용 — 폴더 이름이 일치하지 않고 안에도 매칭 없으면 스킵
+        const matchInside = countTreeMatches(subnode, term);
+        const folderMatches = term && name.toLowerCase().includes(term);
+        if (term && !folderMatches && matchInside === 0) continue;
+
+        parentEl.appendChild(buildFolderRow(name, subnode, fullPath, depth, term));
+    }
+    // 그 뒤 파일들 (이름 순)
+    const files = (node.files || []).slice().sort((a, b) => a.baseTitle.localeCompare(b.baseTitle, 'ko'));
+    for (const f of files) {
+        if (term && !f.baseTitle.toLowerCase().includes(term) && !f.name.toLowerCase().includes(term)) continue;
+        parentEl.appendChild(buildFileRow(f, depth));
+    }
+}
+
+function buildFolderRow(name, subnode, fullPath, depth, term) {
+    const wrap = document.createElement('div');
+    wrap.className = "tree-folder";
+    wrap.style.setProperty('--depth', String(depth));
+
+    const header = document.createElement('div');
+    header.className = "tree-folder-header";
+    const isOpen = state.expanded.has(fullPath) || (term && term.length > 0);  // 검색 중엔 전부 펼침
+    const folderCount = countTreeMatches(subnode, term);
+
+    header.innerHTML = `
+        <span class="tree-arrow">${isOpen ? '▼' : '▶'}</span>
+        <span class="tree-icon">📁</span>
+        <span class="tree-label">${escapeHtml(name)}</span>
+        <span class="tree-count">${folderCount}</span>
+    `;
+    header.addEventListener('click', () => {
+        if (state.expanded.has(fullPath)) state.expanded.delete(fullPath);
+        else state.expanded.add(fullPath);
+        renderList();
+    });
+    wrap.appendChild(header);
+
+    if (isOpen) {
+        const children = document.createElement('div');
+        children.className = "tree-children";
+        renderTreeChildren(children, subnode, fullPath, depth + 1, term);
+        wrap.appendChild(children);
+    }
+    return wrap;
+}
+
+function buildFileRow(file, depth) {
+    const wrap = document.createElement('div');
+    wrap.className = "tree-file";
+    wrap.style.setProperty('--depth', String(depth));
+    wrap.innerHTML = `
+        <span class="tree-arrow"></span>
+        <span class="tree-icon">📄</span>
+        <span class="tree-label">${escapeHtml(file.baseTitle)}</span>
+    `;
+    wrap.addEventListener('click', () => openDocument(file));
+    return wrap;
 }
 
 function buildItemCard(item) {

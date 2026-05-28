@@ -51,6 +51,56 @@ html, body { margin: 0; padding: 0; font-family: -apple-system, 'Malgun Gothic',
     font-size: 14px;
 }
 
+/* ── 백과사전 트리 (인라인 아코디언) ─────────────────── */
+.tree-folder, .tree-file {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    margin-left: calc(var(--depth, 0) * 16px);
+    transition: background 0.12s;
+}
+.tree-folder-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s;
+}
+.tree-folder-header:hover { background: #f0eadd; }
+.tree-folder-header:active { background: #e8dec8; }
+.tree-folder {
+    padding: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+.tree-file:hover { background: #fef3e7; }
+.tree-file:active { background: #f5e8d3; }
+
+.tree-children {
+    /* 자식들이 들여쓰기 직접 가지므로 wrapper 는 패딩 없음 */
+    padding: 0;
+}
+
+.tree-arrow {
+    display: inline-block; width: 14px;
+    color: #888; font-size: 11px;
+    text-align: center;
+}
+.tree-icon { font-size: 15px; }
+.tree-label {
+    flex: 1; font-size: 14px; color: #2c2c2c;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tree-folder-header > .tree-label { font-weight: 600; }
+.tree-count {
+    color: #888; font-size: 12px;
+    background: #f0eadd; padding: 1px 7px; border-radius: 10px;
+}
+
 .cache-badge {
     display: inline-block;
     background: #fef3e7; color: #5d4037;
