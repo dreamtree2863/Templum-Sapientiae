@@ -15,7 +15,8 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v1";
+const CACHE_KEY = "templum.docList.v2";  // v2: 경로 기반 키 + 백과사전 폴더별 subject
+const TOKEN_KEY = "templum.googleAccessToken";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
 
 // 상태
@@ -45,7 +46,29 @@ function show(screenId) {
 }
 function setStatus(msg) { $('status-bar').textContent = msg || ""; }
 
-// ─── OAuth ───────────────────────────────────────────────────────────
+// ─── OAuth + 토큰 영속화 ────────────────────────────────────────────
+function storeToken(token, expiresInSeconds) {
+    try {
+        localStorage.setItem(TOKEN_KEY, JSON.stringify({
+            token,
+            expiresAt: Date.now() + (Number(expiresInSeconds) || 3600) * 1000,
+        }));
+    } catch (_) { /* 용량/권한 오류 — 무시 */ }
+}
+function loadStoredToken() {
+    try {
+        const raw = localStorage.getItem(TOKEN_KEY);
+        if (!raw) return null;
+        const d = JSON.parse(raw);
+        // 60초 여유로 만료 판정 (Drive 호출 중 만료 회피)
+        if (d.expiresAt && d.expiresAt > Date.now() + 60_000) return d.token;
+    } catch (_) {}
+    return null;
+}
+function clearStoredToken() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+}
+
 function initOAuth() {
     if (!window.google?.accounts?.oauth2) {
         // GSI 가 아직 로드되지 않음 — 조금 뒤 재시도
@@ -57,13 +80,36 @@ function initOAuth() {
         scope: SCOPES,
         callback: (resp) => {
             if (resp.error) {
-                alert("로그인 실패: " + resp.error);
+                // silent 재인증 실패는 조용히 무시 — 사용자가 직접 로그인 버튼 누르도록
+                if (!state.silentAuthAttempted) {
+                    alert("로그인 실패: " + resp.error);
+                }
+                state.silentAuthAttempted = false;
                 return;
             }
             state.accessToken = resp.access_token;
+            storeToken(resp.access_token, resp.expires_in);
             onSignedIn();
         }
     });
+    // 초기화 직후 — 저장된 토큰이 있으면 자동 진입
+    autoSignInIfPossible();
+}
+
+function autoSignInIfPossible() {
+    // 1) 만료 전 토큰이 있으면 즉시 사용
+    const cached = loadStoredToken();
+    if (cached) {
+        state.accessToken = cached;
+        onSignedIn();
+        return;
+    }
+    // 2) 없거나 만료 — silent 재인증 시도 (Google 에 로그인된 상태면 동의 화면 없이 토큰 발급)
+    if (!state.tokenClient || GOOGLE_CLIENT_ID.startsWith("<")) return;
+    state.silentAuthAttempted = true;
+    try {
+        state.tokenClient.requestAccessToken({ prompt: '' });
+    } catch (_) { state.silentAuthAttempted = false; }
 }
 
 function requestSignIn() {
@@ -75,7 +121,15 @@ function requestSignIn() {
         alert("GOOGLE_CLIENT_ID 가 설정되지 않았습니다. app.js 상단을 수정하세요.");
         return;
     }
+    state.silentAuthAttempted = false;
     state.tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function signOut() {
+    clearStoredToken();
+    state.accessToken = null;
+    state.grouped = {};
+    show('screen-auth');
 }
 
 async function onSignedIn() {
@@ -153,6 +207,13 @@ async function driveFetch(path, params) {
     const resp = await fetch(url.toString(), {
         headers: { "Authorization": "Bearer " + state.accessToken },
     });
+    if (resp.status === 401) {
+        // 토큰 만료 — 저장 토큰 폐기 + silent 재인증 시도
+        clearStoredToken();
+        state.accessToken = null;
+        autoSignInIfPossible();
+        throw new Error("토큰 만료 — 자동 재로그인 시도 중. 잠시 후 새로고침해 주세요.");
+    }
     if (!resp.ok) throw new Error("Drive API " + resp.status + " " + resp.statusText);
     return resp.json();
 }
@@ -245,14 +306,29 @@ async function loadDocuments(hasCache = false) {
         for (const f of batch) {
             const info = classify(f);
             const segs = f.path.split("/").filter(Boolean);
+
+            // subject 결정:
+            //   · archive/<subject>/...  →  <subject> 폴더명
+            //   · encyclopedia/<a>/<b>/.../file.html  →  가장 가까운 상위 폴더 (deepest)
+            //   · 그 외 → 첫 세그먼트
             let subject = "기타";
-            if (segs[0] === "archive" && segs[1]) subject = segs[1];
-            else if (segs[0] === "encyclopedia") subject = "백과사전";
-            else if (segs[0]) subject = segs[0];
+            if (segs[0] === "archive" && segs[1]) {
+                subject = segs[1];
+            } else if (segs[0] === "encyclopedia") {
+                // encyclopedia 하위 *최하위 폴더* 이름을 subject 로 — 깊은 분류 보존
+                const inner = segs.slice(1).filter(Boolean);
+                subject = inner.length > 0 ? `📖 ${inner[inner.length - 1]}` : "📖 백과사전";
+            } else if (segs[0]) {
+                subject = segs[0];
+            }
+
+            // 그룹 키: *경로 + baseTitle* — 같은 baseTitle 이지만 다른 폴더면 별도 항목.
+            //   같은 폴더 안의 archive 접미사 형제들 (문제/요약본/종합 등) 은 같은 키로 묶여 *버튼 셋* 으로.
+            const groupKey = `${f.path}|${info.baseTitle}`;
 
             groups[subject] = groups[subject] || {};
-            const item = groups[subject][info.baseTitle] = groups[subject][info.baseTitle] || {
-                subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0,
+            const item = groups[subject][groupKey] = groups[subject][groupKey] || {
+                subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
             };
             item.files[info.kind] = { id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label };
             if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
@@ -442,7 +518,9 @@ async function tryInstall() {
 
 // ─── 이벤트 바인딩 ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-    show('screen-auth');
+    // 저장 토큰 있으면 인증 화면 깜빡임 없이 바로 목록 화면으로
+    const hasCachedToken = !!loadStoredToken();
+    show(hasCachedToken ? 'screen-list' : 'screen-auth');
     initOAuth();
     $('btn-signin').addEventListener('click', requestSignIn);
     $('btn-back').addEventListener('click', () => {
