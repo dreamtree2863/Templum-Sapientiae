@@ -587,6 +587,12 @@ async function openDocument(file) {
     show('screen-doc');
     $('title').textContent = file.name;
     $('doc-content').innerHTML = `<div class="hint"><span class="spinner"></span> 문서 로드 중…</div>`;
+
+    // 안드로이드 시스템 뒤로가기 처리용 — 히스토리에 'doc' 상태 push.
+    // 사용자가 폰 하단 < 버튼 누르면 popstate 발화 → 자동으로 목록으로 복귀.
+    if (!history.state || history.state.screen !== 'doc') {
+        history.pushState({ screen: 'doc' }, '', '#doc');
+    }
     try {
         const html = await fetchFileContent(file);
         // body 내용만 추출 (외부 HTML 의 head/style 은 무시 — 안전성 ↑)
@@ -660,9 +666,24 @@ document.addEventListener('DOMContentLoaded', () => {
     show(hasCachedToken ? 'screen-list' : 'screen-auth');
     initOAuth();
     $('btn-signin').addEventListener('click', requestSignIn);
+    // 인앱 ← 버튼 — 시스템 뒤로가기와 동일하게 history 를 통해 처리
     $('btn-back').addEventListener('click', () => {
-        $('title').textContent = "Templum Sapientiae";
-        show('screen-list');
+        if (history.state && history.state.screen === 'doc') {
+            history.back();  // popstate 발화 → 핸들러가 목록 복귀
+        } else {
+            $('title').textContent = "Templum Sapientiae";
+            show('screen-list');
+        }
+    });
+
+    // 시스템 뒤로가기 (안드로이드 폰 하단 < 버튼) — popstate 받으면 목록으로 복귀
+    window.addEventListener('popstate', () => {
+        const docScreen = document.getElementById('screen-doc');
+        if (docScreen && !docScreen.classList.contains('hidden')) {
+            $('title').textContent = "Templum Sapientiae";
+            show('screen-list');
+        }
+        // 목록 화면에서 추가로 뒤로가기 → 기본 동작 (PWA 종료 / 브라우저 이전 페이지)
     });
     $('btn-refresh').addEventListener('click', () => {
         if (state.accessToken) loadDocuments();
