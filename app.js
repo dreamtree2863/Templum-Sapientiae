@@ -394,7 +394,25 @@ function renderList() {
     const term = state.searchTerm.trim().toLowerCase();
     let totalShown = 0;
 
-    // ── 1. archive 그룹 (시험·문제·요약본 등) ──
+    // ── 1. encyclopedia 트리 (인라인 아코디언) — 위로 ──
+    const encTree = state.encyclopediaTree;
+    const hasEnc = !!encTree && (Object.keys(encTree.folders).length || encTree.files.length);
+    if (hasEnc) {
+        const encShown = countTreeMatches(encTree, term);
+        if (encShown > 0) {
+            const encGrp = document.createElement('div');
+            encGrp.className = "subject-group";
+            const encH = document.createElement('h3');
+            encH.textContent = `📖 백과사전 (${encShown})`;
+            encGrp.appendChild(encH);
+            // 루트 폴더의 자식들 직접 렌더 (루트 폴더 자체는 토글 없음)
+            renderTreeChildren(encGrp, encTree, "", 0, term);
+            container.appendChild(encGrp);
+            totalShown += encShown;
+        }
+    }
+
+    // ── 2. archive 그룹 (시험·문제·요약본 등) — 아래로 ──
     const subjects = Object.keys(state.grouped).sort();
     for (const subject of subjects) {
         const items = Object.values(state.grouped[subject])
@@ -416,24 +434,6 @@ function renderList() {
             totalShown++;
         }
         container.appendChild(grp);
-    }
-
-    // ── 2. encyclopedia 트리 (인라인 아코디언) ──
-    const encTree = state.encyclopediaTree;
-    const hasEnc = !!encTree && (Object.keys(encTree.folders).length || encTree.files.length);
-    if (hasEnc) {
-        const encShown = countTreeMatches(encTree, term);
-        if (encShown > 0) {
-            const encGrp = document.createElement('div');
-            encGrp.className = "subject-group";
-            const encH = document.createElement('h3');
-            encH.textContent = `📖 백과사전 (${encShown})`;
-            encGrp.appendChild(encH);
-            // 루트 폴더의 자식들 직접 렌더 (루트 폴더 자체는 토글 없음)
-            renderTreeChildren(encGrp, encTree, "", 0, term);
-            container.appendChild(encGrp);
-            totalShown += encShown;
-        }
     }
 
     if (totalShown === 0) {
