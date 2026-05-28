@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#1b263b">
+    <title>Templum Sapientiae</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- MathJax — 문서에 수식이 있을 때 자동 렌더 -->
+    <script>
+      window.MathJax = {
+        tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]'], ['$$', '$$']] },
+        options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+      };
+    </script>
+    <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Google Identity Services — OAuth 토큰 발급 -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <header id="topbar">
+        <button id="btn-back" class="iconbtn" style="display:none;" aria-label="뒤로">←</button>
+        <h1 id="title">Templum Sapientiae</h1>
+        <button id="btn-refresh" class="iconbtn" aria-label="새로고침">🔄</button>
+    </header>
+
+    <main id="main">
+        <!-- 로그인 화면 -->
+        <section id="screen-auth" class="screen">
+            <div class="card">
+                <h2>Google 로그인</h2>
+                <p>Drive 의 <code>Templum/</code> 폴더에 동기화된 문서를 읽으려면 로그인이 필요합니다.</p>
+                <button id="btn-signin" class="action-btn">Google 계정으로 로그인</button>
+                <p class="hint">읽기 전용 권한만 요청합니다. 다른 Drive 파일에는 접근하지 않습니다.</p>
+            </div>
+        </section>
+
+        <!-- 목록 화면 -->
+        <section id="screen-list" class="screen hidden">
+            <div id="status-bar" class="hint"></div>
+            <div id="item-list"></div>
+        </section>
+
+        <!-- 문서 뷰어 -->
+        <section id="screen-doc" class="screen hidden">
+            <article id="doc-content"></article>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+    <script>
+      // 서비스워커 등록 (온디맨드 캐시)
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW 등록 실패', err));
+        });
+      }
+    </script>
+</body>
+</html>
