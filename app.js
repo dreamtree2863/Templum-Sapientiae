@@ -17,7 +17,23 @@ const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
 const CACHE_KEY = "templum.docList.v2";  // v2: 경로 기반 키 + 백과사전 폴더별 subject
 const TOKEN_KEY = "templum.googleAccessToken";
+const EXPANDED_KEY = "templum.expanded.v1";  // 펼친 폴더 경로 집합
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
+
+// 펼친 폴더 상태 영속화 helpers
+function loadExpanded() {
+    try {
+        const raw = localStorage.getItem(EXPANDED_KEY);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr : []);
+    } catch (_) { return new Set(); }
+}
+function saveExpanded() {
+    try {
+        localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded]));
+    } catch (_) {}
+}
 
 // 상태
 const state = {
@@ -28,8 +44,8 @@ const state = {
     grouped: {},
     /** encyclopedia: 폴더 트리 { folders:{ name: subtree }, files:[{...}] } */
     encyclopediaTree: { folders: {}, files: [] },
-    /** 펼쳐진 폴더 경로 (예: "경제학", "경제학/거시경제학") — 화면 새로고침 후에도 유지 */
-    expanded: new Set(),
+    /** 펼쳐진 폴더 경로 (예: "경제학", "경제학/거시경제학") — localStorage 영속 */
+    expanded: loadExpanded(),
     /** 검색 필터 (소문자) */
     searchTerm: "",
     /** 마지막 캐시 시각 (Date.now()) */
@@ -485,6 +501,7 @@ function buildFolderRow(name, subnode, fullPath, depth, term) {
     header.addEventListener('click', () => {
         if (state.expanded.has(fullPath)) state.expanded.delete(fullPath);
         else state.expanded.add(fullPath);
+        saveExpanded();
         renderList();
     });
     wrap.appendChild(header);
