@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 // ⚠️ 사용 전 1회 설정 — README §A 참고
-const GOOGLE_CLIENT_ID = "<여기에-Google-Cloud-에서-발급받은-OAuth-Client-ID-입력>.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "113629352800-he0vmc6f2m3f3vn5clr968db12sf6t4u.apps.googleusercontent.com";
 const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 
 // 읽기 전용 권한만 — 다른 Drive 파일에는 접근 불가
