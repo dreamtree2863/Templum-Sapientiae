@@ -58,7 +58,6 @@ html, body { margin: 0; padding: 0; font-family: -apple-system, 'Malgun Gothic',
     border-radius: 8px;
     cursor: pointer;
     user-select: none;
-    margin-left: calc(var(--depth, 0) * 8px);
     transition: background 0.12s;
 }
 .tree-folder-header {
@@ -80,9 +79,9 @@ html, body { margin: 0; padding: 0; font-family: -apple-system, 'Malgun Gothic',
 .tree-file:hover { background: #fef3e7; }
 .tree-file:active { background: #f5e8d3; }
 
+/* 자식 컨테이너 — *한 단계마다 8px* 만 들여쓰기 (누적은 자연스럽게 일어남) */
 .tree-children {
-    /* 자식들이 들여쓰기 직접 가지므로 wrapper 는 패딩 없음 */
-    padding: 0;
+    padding-left: 8px;
 }
 
 .tree-arrow {
