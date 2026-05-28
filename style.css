@@ -138,6 +138,17 @@ html, body { margin: 0; padding: 0; font-family: -apple-system, 'Malgun Gothic',
 #doc-content th, #doc-content td { border: 1px solid #bbb; padding: 6px 10px; }
 #doc-content .toc { background: #f9f9f9; border: 1px solid #ddd; padding: 12px; border-radius: 6px; }
 
+.exit-toast {
+    position: fixed; left: 50%; bottom: 30px;
+    transform: translateX(-50%);
+    background: rgba(27, 38, 59, 0.92); color: #fdfbf7;
+    padding: 12px 22px; border-radius: 24px;
+    font-size: 14px; font-weight: 500;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+    z-index: 200; pointer-events: none;
+    animation: slideUp 0.25s ease-out;
+}
+
 .update-toast {
     position: fixed; left: 50%; bottom: 24px;
     transform: translateX(-50%);

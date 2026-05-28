@@ -624,6 +624,23 @@ function escapeHtml(s) {
     }[c]));
 }
 
+// 종료 안내 토스트 — 2초간 화면 하단에 표시
+let _exitToastEl = null;
+let _exitToastTimer = null;
+function showExitToast() {
+    if (!_exitToastEl) {
+        _exitToastEl = document.createElement('div');
+        _exitToastEl.className = "exit-toast";
+        _exitToastEl.textContent = "한 번 더 뒤로가기를 누르면 종료됩니다";
+        document.body.appendChild(_exitToastEl);
+    }
+    _exitToastEl.style.display = '';
+    if (_exitToastTimer) clearTimeout(_exitToastTimer);
+    _exitToastTimer = setTimeout(() => {
+        if (_exitToastEl) _exitToastEl.style.display = 'none';
+    }, 2000);
+}
+
 // ─── PWA 설치 프롬프트 ──────────────────────────────────────────────
 // Chrome (안드로이드/데스크톱) 은 PWA 가 설치 가능할 때 `beforeinstallprompt` 를 발화시킴.
 // 우리는 그 이벤트를 *낚아채서 보관* 했다가 사용자가 버튼을 누를 때 prompt() 호출.
@@ -666,24 +683,46 @@ document.addEventListener('DOMContentLoaded', () => {
     show(hasCachedToken ? 'screen-list' : 'screen-auth');
     initOAuth();
     $('btn-signin').addEventListener('click', requestSignIn);
-    // 인앱 ← 버튼 — 시스템 뒤로가기와 동일하게 history 를 통해 처리
-    $('btn-back').addEventListener('click', () => {
-        if (history.state && history.state.screen === 'doc') {
-            history.back();  // popstate 발화 → 핸들러가 목록 복귀
-        } else {
-            $('title').textContent = "Templum Sapientiae";
-            show('screen-list');
-        }
-    });
+    // 인앱 ← 버튼 — 시스템 뒤로가기와 동일하게 history.back()
+    $('btn-back').addEventListener('click', () => history.back());
 
-    // 시스템 뒤로가기 (안드로이드 폰 하단 < 버튼) — popstate 받으면 목록으로 복귀
-    window.addEventListener('popstate', () => {
+    // ── History 초기 상태 세팅 ──
+    // 시스템 뒤로가기를 *2단계로 처리* 하기 위해 sentinel 을 history 바닥에 깔아둠.
+    //   [list-bottom (sentinel)] → [list (사용자 시작 위치)] → [doc (문서 열람)]
+    //   · 문서에서 ← → list 로 복귀
+    //   · 목록에서 ← → list-bottom 으로 갔다가 toast + 재푸시 (앱 안 꺼짐)
+    //   · 2초 내 한 번 더 ← → 재푸시 없이 list-bottom 에 머물고 다음 ← 에서 앱 종료
+    if (!history.state || history.state.screen !== 'list') {
+        history.replaceState({ screen: 'list-bottom' }, '', location.pathname);
+        history.pushState({ screen: 'list' }, '', '#list');
+    }
+
+    let lastBackPress = 0;
+    window.addEventListener('popstate', (e) => {
+        const st = e.state || {};
         const docScreen = document.getElementById('screen-doc');
-        if (docScreen && !docScreen.classList.contains('hidden')) {
+        const onDoc = docScreen && !docScreen.classList.contains('hidden');
+
+        if (st.screen === 'list' && onDoc) {
+            // 문서에서 ← → 목록으로 복귀
             $('title').textContent = "Templum Sapientiae";
             show('screen-list');
+            return;
         }
-        // 목록 화면에서 추가로 뒤로가기 → 기본 동작 (PWA 종료 / 브라우저 이전 페이지)
+
+        if (st.screen === 'list-bottom') {
+            // 목록에서 ← 누름 — 2단계 종료 처리
+            const now = Date.now();
+            if (now - lastBackPress < 2000) {
+                // 2초 내 두 번째 ← → 가로채지 않음. 다음 ← 에서 앱 종료.
+                lastBackPress = 0;
+                return;
+            }
+            lastBackPress = now;
+            // 첫 번째 ← → list 상태 재푸시 + 안내 토스트
+            history.pushState({ screen: 'list' }, '', '#list');
+            showExitToast();
+        }
     });
     $('btn-refresh').addEventListener('click', () => {
         if (state.accessToken) loadDocuments();

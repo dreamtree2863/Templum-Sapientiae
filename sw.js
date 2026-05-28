@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 // 버전 — 셸 파일 갱신 시 bump (예: -v2, -v3 …)
-const SHELL_CACHE = "templum-shell-v2";
+const SHELL_CACHE = "templum-shell-v3";  // 시스템 뒤로가기 + 2단계 종료
 const DOC_CACHE = "templum-docs-v1";
 
 const SHELL_FILES = [
