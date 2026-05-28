@@ -5,7 +5,8 @@
 //   · 캐시 적중 시 즉시 반환 (오프라인 OK), 없으면 네트워크 → 캐시
 // ─────────────────────────────────────────────────────────────────────
 
-const SHELL_CACHE = "templum-shell-v1";
+// 버전 — 셸 파일 갱신 시 bump (예: -v2, -v3 …)
+const SHELL_CACHE = "templum-shell-v2";
 const DOC_CACHE = "templum-docs-v1";
 
 const SHELL_FILES = [
@@ -20,7 +21,7 @@ self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(SHELL_CACHE).then(cache => cache.addAll(SHELL_FILES)).catch(() => {})
     );
-    self.skipWaiting();
+    // skipWaiting 은 페이지가 명시적으로 메시지 보낼 때만 — 사용자가 토스트 누르기 전까진 옛 버전 유지
 });
 
 self.addEventListener('activate', event => {
@@ -30,6 +31,13 @@ self.addEventListener('activate', event => {
         ))
     );
     self.clients.claim();
+});
+
+// 페이지에서 'skipWaiting' 메시지 받으면 즉시 활성화 — 토스트 클릭 시 호출됨
+self.addEventListener('message', event => {
+    if (event.data === 'skipWaiting') {
+        self.skipWaiting();
+    }
 });
 
 self.addEventListener('fetch', event => {
@@ -43,16 +51,17 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // PWA 셸 — cache first
+    // PWA 셸 — *network-first* 로 변경: 항상 최신 시도, 실패 시 캐시.
+    // 이렇게 해야 새 버전 푸시가 다음 접속 시 즉시 반영됨.
     if (req.method === "GET" && url.origin === self.location.origin) {
         event.respondWith(
-            caches.match(req).then(hit => hit || fetch(req).then(resp => {
+            fetch(req).then(resp => {
                 if (resp.ok) {
                     const clone = resp.clone();
                     caches.open(SHELL_CACHE).then(c => c.put(req, clone)).catch(() => {});
                 }
                 return resp;
-            }))
+            }).catch(() => caches.match(req))
         );
         return;
     }

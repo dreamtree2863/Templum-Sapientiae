@@ -56,12 +56,53 @@
         </section>
     </main>
 
+    <!-- 업데이트 토스트 (서비스워커가 새 버전 감지하면 표시됨) -->
+    <div id="update-toast" class="update-toast" style="display:none;" role="alert">
+        🔄 새 버전이 준비됐어요. 탭하면 갱신
+    </div>
+
     <script src="app.js"></script>
     <script>
-      // 서비스워커 등록 (온디맨드 캐시)
+      // ── 서비스워커 등록 + 업데이트 감지 ──
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW 등록 실패', err));
+          navigator.serviceWorker.register('sw.js').then(reg => {
+            // 30분마다 새 버전 있는지 자동 확인
+            setInterval(() => { reg.update().catch(() => {}); }, 30 * 60 * 1000);
+
+            function notifyUpdate(worker) {
+              const toast = document.getElementById('update-toast');
+              if (!toast || !worker) return;
+              toast.style.display = '';
+              toast.onclick = () => {
+                toast.textContent = "🔄 갱신 중…";
+                worker.postMessage('skipWaiting');
+              };
+            }
+
+            // 새 SW 가 이미 대기 중 (이전 방문에서 받아둔 상태)
+            if (reg.waiting && navigator.serviceWorker.controller) {
+              notifyUpdate(reg.waiting);
+            }
+            // 새 SW 발견 → 설치 진행 → 'installed' 상태에서 안내
+            reg.addEventListener('updatefound', () => {
+              const sw = reg.installing;
+              if (!sw) return;
+              sw.addEventListener('statechange', () => {
+                if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+                  notifyUpdate(sw);
+                }
+              });
+            });
+          }).catch(err => console.warn('SW 등록 실패', err));
+
+          // 새 SW 가 컨트롤러로 바뀌면 자동 새로고침 (skipWaiting → controllerchange)
+          let reloaded = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (reloaded) return;
+            reloaded = true;
+            window.location.reload();
+          });
         });
       }
     </script>
