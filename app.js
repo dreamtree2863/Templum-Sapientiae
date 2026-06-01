@@ -15,7 +15,7 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v2";  // v2: 경로 기반 키 + 백과사전 폴더별 subject
+const CACHE_KEY = "templum.docList.v3";  // v3: 새 추출본 형식 (mock_expl/mock_expl_ip/q_a) 반영
 const TOKEN_KEY = "templum.googleAccessToken";
 const EXPANDED_KEY = "templum.expanded.v1";  // 펼친 폴더 경로 집합
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
