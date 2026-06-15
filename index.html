@@ -26,6 +26,7 @@
         <button id="btn-back" class="iconbtn" style="display:none;" aria-label="뒤로">←</button>
         <h1 id="title">Templum Sapientiae</h1>
         <button id="btn-install" class="iconbtn" style="display:none;" aria-label="앱 설치" title="홈 화면에 앱으로 설치">📲</button>
+        <button id="btn-ai" class="iconbtn" aria-label="문서 AI" title="문서 내용에 대해 질문">🤖</button>
         <button id="btn-refresh" class="iconbtn" aria-label="새로고침">🔄</button>
     </header>
 
@@ -53,6 +54,20 @@
         <!-- 문서 뷰어 -->
         <section id="screen-doc" class="screen hidden">
             <article id="doc-content"></article>
+        </section>
+
+        <!-- 문서 AI (동기화된 문서 내용 기반 Q&A) -->
+        <section id="screen-ai" class="screen hidden">
+            <div class="ai-toolbar">
+                <button type="button" id="btn-ai-key">🔑 API 키</button>
+                <button type="button" id="btn-ai-model">🎛️ 모델</button>
+                <button type="button" id="btn-ai-clear">🗑️ 지우기</button>
+            </div>
+            <div id="ai-chat" class="ai-chat"></div>
+            <div class="ai-input-row">
+                <input type="text" id="ai-input" placeholder="문서 내용에 대해 질문하세요…" autocomplete="off" enterkeyhint="send">
+                <button type="button" id="ai-send" class="ai-send" aria-label="보내기">➤</button>
+            </div>
         </section>
     </main>
 

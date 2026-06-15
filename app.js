@@ -15,7 +15,7 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v3";  // v3: 새 추출본 형식 (mock_expl/mock_expl_ip/q_a) 반영
+const CACHE_KEY = "templum.docList.v4";  // v4: archive 형식/과목 폴더 구조 변경(형식 무관 그룹화) 반영
 const TOKEN_KEY = "templum.googleAccessToken";
 const EXPANDED_KEY = "templum.expanded.v1";  // 펼친 폴더 경로 집합
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
@@ -48,6 +48,9 @@ const state = {
     expanded: loadExpanded(),
     /** 검색 필터 (소문자) */
     searchTerm: "",
+    /** 아카이브 분류 탭 + 계단식 필터 (형식→학문→연도/순환/저자/문제책) */
+    archiveTab: '모의고사',
+    af: { fmt: '', lv1: '', lv2a: '', lv2b: '', lvJ: '' },
     /** 마지막 캐시 시각 (Date.now()) */
     fetchedAt: 0,
     /** 백그라운드 갱신 중 표시용 */
@@ -61,8 +64,10 @@ const $ = id => document.getElementById(id);
 function show(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
     $(screenId).classList.remove('hidden');
-    $('btn-back').style.display = (screenId === 'screen-doc') ? '' : 'none';
+    $('btn-back').style.display = (screenId === 'screen-doc' || screenId === 'screen-ai') ? '' : 'none';
     $('btn-refresh').style.display = (screenId === 'screen-list') ? '' : 'none';
+    const aiBtn = $('btn-ai');
+    if (aiBtn) aiBtn.style.display = (screenId === 'screen-list') ? '' : 'none';
 }
 function setStatus(msg) { $('status-bar').textContent = msg || ""; }
 
@@ -294,6 +299,7 @@ const SUFFIX_MAP = [
     ["_문제목차추출본.html",{ kind: "q_toc",         label: "문제+목차" }],
     ["_문제추출본.html",   { kind: "q_only",        label: "문제" }],
     ["_시험기준.html",     { kind: "exam_criteria", label: "출제 기준" }],
+    ["_채점기준.html",     { kind: "grading_criteria", label: "채점 기준" }],
     // 쟁점(문제 외 지식) 계열
     ["_쟁점목차.html",     { kind: "topic_toc",     label: "쟁점목차" }],
     ["_쟁점본문.html",     { kind: "topic_body",    label: "쟁점본문" }],
@@ -339,15 +345,23 @@ async function loadDocuments(hasCache = false) {
                     baseTitle: info.baseTitle, kind: info.kind, label: info.label,
                 });
             } else {
-                // archive (및 그 외) 는 기존처럼 *주제별 그룹화*
-                let subject = "기타";
-                if (segs[0] === "archive" && segs[1]) subject = segs[1];
-                else if (segs[0]) subject = segs[0];
+                // archive 구조: archive/{형식}/{과목}/{책폴더}/...  (2026-06 폴더 구조 변경)
+                //   · 과목(subject)=segs[2], 책폴더(book)=segs[3].
+                //   · 같은 시험의 문제/종합/요약/채점 파일이 형식 폴더로 흩어지므로,
+                //     형식을 제외한 (과목|책폴더|제목) 으로 묶어 한 카드에 모은다.
+                let subject = "기타", book = "";
+                if (segs[0] === "archive") {
+                    subject = segs[2] || segs[1] || "기타";
+                    book = segs[3] || "";
+                } else if (segs[0]) {
+                    subject = segs[0];
+                    book = segs[1] || "";
+                }
 
-                const groupKey = `${f.path}|${info.baseTitle}`;
+                const groupKey = `${subject}|${book}|${info.baseTitle}`;
                 groups[subject] = groups[subject] || {};
                 const item = groups[subject][groupKey] = groups[subject][groupKey] || {
-                    subject, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
+                    subject, book, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
                 };
                 item.files[info.kind] = {
                     id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label,
@@ -386,6 +400,128 @@ function addFileToTree(node, folderSegs, file) {
     addFileToTree(node.folders[head], rest, file);
 }
 
+// ─── 아카이브 분류 (데스크톱 archive.js 와 동일 기준) ─────────────────
+const ARCHIVE_TABS = ['모의고사', '문제책', '쟁점정리집', '기타'];
+function arcCategory(item) {
+    const f = item.files || {};
+    const t = item.baseTitle || '';
+    const mockByName = /\d{4}/.test(t) && /\d+\s*순/.test(t) && /\d+\s*회/.test(t);
+    if (f.exam_criteria || f.grading_criteria || mockByName) return '모의고사';
+    if (f.topic_toc || f.topic_body || f.topic_summary) return '쟁점정리집';
+    if (f.q_only || f.q_toc || f.q_toc_a) return '문제책';
+    return '기타';
+}
+const arcFormat = (item) => item.format || '논술형';   // PWA: 내용 미독 → 기본 논술형
+function arcDisc(item) {
+    if (state.archiveTab === '모의고사' && state.af.fmt === '객관식') {
+        const s = `${item.baseTitle || ''} ${item.path || ''}`;
+        if (/언어\s*논리/.test(s)) return '언어논리';
+        if (/자료\s*해석/.test(s)) return '자료해석';
+        if (/상황\s*판단/.test(s)) return '상황판단';
+        return '기타';
+    }
+    return item.subject || '기타';
+}
+function arcYear(item) { const m = (item.baseTitle || '').match(/(\d{4})/) || (item.path || '').match(/(\d{4})/); return m ? m[1] : '연도미상'; }
+function arcCycle(item) { const m = (item.baseTitle || '').match(/(\d+)\s*순/) || (item.path || '').match(/(\d+)\s*순/); return m ? m[1] + '순환' : '순환미상'; }
+function arcBook(item) { return item.book || ((item.path || '').split('/').filter(Boolean)[3]) || '기타'; }
+function arcAuthor(item) {
+    const t = (item.baseTitle || '').replace(/\d{4}/g, ' ').replace(/\d+\s*회/g, ' ').replace(/\d+\s*순환?/g, ' ')
+        .replace(/언어\s*논리|자료\s*해석|상황\s*판단|모의고사/g, ' ');
+    const toks = t.split(/[\s_]+/).filter(x => /[가-힣A-Za-z]/.test(x) && x.length <= 6);
+    return toks.length ? toks[0] : '저자미상';
+}
+const arcUniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }));
+
+function arcChipRow(label, values, active, onPick) {
+    const row = document.createElement('div'); row.className = 'arc-chiprow';
+    const lab = document.createElement('span'); lab.className = 'arc-lab'; lab.textContent = label;
+    row.appendChild(lab);
+    [['', '전체'], ...values.map(v => [v, v])].forEach(([val, text]) => {
+        const b = document.createElement('button');
+        b.className = 'arc-chip' + (active === val ? ' on' : '');
+        b.textContent = text;
+        b.addEventListener('click', () => onPick(val));
+        row.appendChild(b);
+    });
+    return row;
+}
+
+function renderArchiveSection(container, allArcItems, term) {
+    const counts = { 모의고사: 0, 문제책: 0, 쟁점정리집: 0, 기타: 0 };
+    allArcItems.forEach(it => counts[arcCategory(it)]++);
+    if (counts[state.archiveTab] === 0) state.archiveTab = ARCHIVE_TABS.find(t => counts[t] > 0) || '모의고사';
+
+    const wrap = document.createElement('div'); wrap.className = 'subject-group';
+
+    const tabBar = document.createElement('div'); tabBar.className = 'arc-tabbar';
+    ARCHIVE_TABS.forEach(t => {
+        const b = document.createElement('button');
+        b.className = 'arc-tab' + (t === state.archiveTab ? ' on' : '');
+        b.textContent = `${t} (${counts[t]})`;
+        b.addEventListener('click', () => { state.archiveTab = t; state.af = { fmt: '', lv1: '', lv2a: '', lv2b: '', lvJ: '' }; renderList(); });
+        tabBar.appendChild(b);
+    });
+    wrap.appendChild(tabBar);
+
+    const tab = state.archiveTab, af = state.af;
+    const tabItems = allArcItems.filter(it => arcCategory(it) === tab);
+    let finalItems = tabItems;
+
+    if (tab === '쟁점정리집') {
+        wrap.appendChild(arcChipRow('학문', arcUniq(tabItems.map(it => it.subject)), af.lvJ, v => { af.lvJ = v; renderList(); }));
+        finalItems = tabItems.filter(it => !af.lvJ || it.subject === af.lvJ);
+    } else if (tab === '기타') {
+        finalItems = tabItems;
+    } else {
+        const fmtRow = document.createElement('div'); fmtRow.className = 'arc-chiprow';
+        const lab = document.createElement('span'); lab.className = 'arc-lab'; lab.textContent = '형식'; fmtRow.appendChild(lab);
+        [['논술형', '논술형'], ['객관식', '객관식']].forEach(([val, label]) => {
+            const cnt = tabItems.filter(it => arcFormat(it) === val).length;
+            const b = document.createElement('button'); b.className = 'arc-chip fmt' + (af.fmt === val ? ' on' : '');
+            b.textContent = `${label} (${cnt})`;
+            b.addEventListener('click', () => { af.fmt = (af.fmt === val ? '' : val); af.lv1 = ''; af.lv2a = ''; af.lv2b = ''; renderList(); });
+            fmtRow.appendChild(b);
+        });
+        wrap.appendChild(fmtRow);
+
+        if (!af.fmt) {
+            finalItems = tabItems;
+        } else {
+            const fmtItems = tabItems.filter(it => arcFormat(it) === af.fmt);
+            wrap.appendChild(arcChipRow('학문', arcUniq(fmtItems.map(arcDisc)), af.lv1, v => { af.lv1 = v; af.lv2a = ''; af.lv2b = ''; renderList(); }));
+            if (!af.lv1) {
+                finalItems = fmtItems;
+            } else {
+                const discItems = fmtItems.filter(it => arcDisc(it) === af.lv1);
+                if (tab === '모의고사' && af.fmt === '객관식') {
+                    wrap.appendChild(arcChipRow('연도', arcUniq(discItems.map(arcYear)), af.lv2a, v => { af.lv2a = v; renderList(); }));
+                    wrap.appendChild(arcChipRow('저자', arcUniq(discItems.map(arcAuthor)), af.lv2b, v => { af.lv2b = v; renderList(); }));
+                    finalItems = discItems.filter(it => (!af.lv2a || arcYear(it) === af.lv2a) && (!af.lv2b || arcAuthor(it) === af.lv2b));
+                } else if (tab === '모의고사') {
+                    wrap.appendChild(arcChipRow('연도', arcUniq(discItems.map(arcYear)), af.lv2a, v => { af.lv2a = v; renderList(); }));
+                    wrap.appendChild(arcChipRow('순환', arcUniq(discItems.map(arcCycle)), af.lv2b, v => { af.lv2b = v; renderList(); }));
+                    finalItems = discItems.filter(it => (!af.lv2a || arcYear(it) === af.lv2a) && (!af.lv2b || arcCycle(it) === af.lv2b));
+                } else {
+                    wrap.appendChild(arcChipRow('문제책', arcUniq(discItems.map(arcBook)), af.lv2b, v => { af.lv2b = v; renderList(); }));
+                    finalItems = discItems.filter(it => !af.lv2b || arcBook(it) === af.lv2b);
+                }
+            }
+        }
+    }
+
+    let items = finalItems.filter(it => !term || (it.baseTitle || '').toLowerCase().includes(term) || (it.subject || '').toLowerCase().includes(term));
+    items.sort((a, b) => (a.subject || '').localeCompare(b.subject || '', 'ko', { numeric: true }) || (a.baseTitle || '').localeCompare(b.baseTitle || '', 'ko', { numeric: true }));
+
+    const cnt = document.createElement('div'); cnt.className = 'arc-count';
+    cnt.textContent = `📚 ${tab} ${items.length}개`;
+    wrap.appendChild(cnt);
+
+    items.forEach(it => wrap.appendChild(buildItemCard(it)));
+    container.appendChild(wrap);
+    return items.length;
+}
+
 // ─── 렌더링 ─────────────────────────────────────────────────────────
 function renderList() {
     const container = $('item-list');
@@ -412,28 +548,13 @@ function renderList() {
         }
     }
 
-    // ── 2. archive 그룹 (시험·문제·요약본 등) — 아래로 ──
-    const subjects = Object.keys(state.grouped).sort();
-    for (const subject of subjects) {
-        const items = Object.values(state.grouped[subject])
-            .filter(it => !term
-                || it.baseTitle.toLowerCase().includes(term)
-                || subject.toLowerCase().includes(term))
-            .sort((a, b) => a.baseTitle.localeCompare(b.baseTitle, 'ko'));
-
-        if (items.length === 0) continue;
-
-        const grp = document.createElement('div');
-        grp.className = "subject-group";
-        const h = document.createElement('h3');
-        h.textContent = `📚 ${subject} (${items.length})`;
-        grp.appendChild(h);
-
-        for (const item of items) {
-            grp.appendChild(buildItemCard(item));
-            totalShown++;
-        }
-        container.appendChild(grp);
+    // ── 2. archive — 4탭 + 계단식 필터 (모의고사/문제책/쟁점정리집/기타) ──
+    const allArcItems = [];
+    for (const subj of Object.keys(state.grouped)) {
+        for (const it of Object.values(state.grouped[subj])) allArcItems.push(it);
+    }
+    if (allArcItems.length) {
+        totalShown += renderArchiveSection(container, allArcItems, term);
     }
 
     if (totalShown === 0) {
@@ -552,7 +673,7 @@ function buildItemCard(item) {
     // 쟁점 파일만 있으면 쟁점 버튼 셋, 아니면 시험 버튼 셋
     const hasTopic = !!(item.files.topic_toc || item.files.topic_body || item.files.topic_summary);
     const hasExam = !!(item.files.q_only || item.files.q_toc || item.files.q_toc_a
-                       || item.files.summary || item.files.exam_criteria);
+                       || item.files.summary || item.files.exam_criteria || item.files.grading_criteria);
 
     let kinds;
     if (hasTopic && !hasExam) {
@@ -560,6 +681,7 @@ function buildItemCard(item) {
     } else if (hasExam) {
         kinds = ["q_only", "q_toc", "q_toc_a", "summary"];
         if (item.files.exam_criteria) kinds.push("exam_criteria");
+        if (item.files.grading_criteria) kinds.push("grading_criteria");
     } else {
         kinds = ["plain"];
     }
@@ -676,6 +798,348 @@ async function tryInstall() {
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// 문서 AI — 동기화된 문서 내용에 *근거하여* 질문에 답하는 가벼운 RAG.
+//   데스크톱 unified_ai.py 의 깔때기(키워드→재선별→전문로드→답변)를
+//   임베딩 인덱스 없이 모바일에서 재현. 외부 SDK 없이 Gemini REST 직접 호출.
+//     ① 로드된 문서 목록(제목·경로)에서 키워드 점수화 → 후보 추림
+//     ② 저비용 모델로 재선별(가장 관련 있는 문서 번호만)
+//     ③ 선택 문서 본문을 Drive 에서 받아 텍스트로 정제
+//     ④ 자료에만 근거하도록 지시 + 출처 명시하여 답변 생성
+// ═════════════════════════════════════════════════════════════════════
+const AI_KEY_LS = "templum.geminiApiKey";
+const AI_MODEL_LS = "templum.aiModel";
+const AI_DEFAULT_MODEL = "gemini-3-flash-preview";   // 데스크톱 통합 AI 기본 답변 모델과 동일
+const AI_CHEAP_MODEL = "gemini-3.1-flash-lite";       // 재선별용 저비용 모델
+const AI_MAX_DOCS = 6;          // 답변에 넣을 최대 문서 수
+const AI_CAND = 40;             // 제목·경로 기반 1차 후보 수
+const AI_READ = 12;             // 본문을 실제로 읽어 내용 채점할 문서 수
+const AI_DOC_CHARS = 3500;      // 문서 1개당 컨텍스트(관련 단락) 최대 글자
+let aiBusy = false;
+
+function getAiKey() { try { return (localStorage.getItem(AI_KEY_LS) || "").trim(); } catch (_) { return ""; } }
+function getAiModel() { try { return (localStorage.getItem(AI_MODEL_LS) || "").trim() || AI_DEFAULT_MODEL; } catch (_) { return AI_DEFAULT_MODEL; } }
+function promptAiKey() {
+    const v = prompt("Google Gemini API 키를 입력하세요\n(데스크톱 프로그램의 gemini_api_key.txt 와 동일한 키):", getAiKey());
+    if (v != null) { try { localStorage.setItem(AI_KEY_LS, v.trim()); } catch (_) {} }
+    return getAiKey();
+}
+function promptAiModel() {
+    const v = prompt("AI 답변에 사용할 Gemini 모델명:\n(예: gemini-3-flash-preview, gemini-3.5-pro 등)", getAiModel());
+    if (v != null && v.trim()) { try { localStorage.setItem(AI_MODEL_LS, v.trim()); } catch (_) {} }
+}
+
+// 로드된 문서들을 평탄화 — {id, title, path, mtime}. 아카이브 그룹은 내용이 풍부한 대표 1개만.
+function flattenDocs() {
+    const docs = [];
+    (function walk(node) {
+        for (const f of (node.files || [])) {
+            docs.push({ id: f.id, title: f.baseTitle || f.name, path: f.path || "encyclopedia", mtime: f.mtime || 0 });
+        }
+        for (const sub of Object.values(node.folders || {})) walk(sub);
+    })(state.encyclopediaTree || { folders: {}, files: [] });
+
+    const PREF = ["topic_body", "q_toc_a", "topic_summary", "summary", "q_toc", "q_only", "grading_criteria", "exam_criteria", "topic_toc", "plain"];
+    for (const subj of Object.keys(state.grouped || {})) {
+        for (const it of Object.values(state.grouped[subj])) {
+            let chosen = null;
+            for (const k of PREF) { if (it.files[k]) { chosen = it.files[k]; break; } }
+            if (!chosen) { const ks = Object.keys(it.files); if (ks.length) chosen = it.files[ks[0]]; }
+            if (chosen) docs.push({ id: chosen.id, title: it.baseTitle, path: it.path || subj, mtime: it.latestMtime || 0 });
+        }
+    }
+    return docs;
+}
+
+function _bigrams(s) { const set = new Set(); for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2)); return set; }
+
+// 키워드 점수화 — 제목 일치 +3, 경로 일치 +1. 결과가 빈약하면 글자 바이그램 겹침으로 보강.
+function scoreDocs(docs, query) {
+    const ql = query.toLowerCase();
+    const tokens = ql.split(/[\s,.?!()\[\]{}'"·…:;/\\、，。]+/).filter(t => t.length >= 2);
+    const scored = docs.map(d => {
+        const t = (d.title || "").toLowerCase(), p = (d.path || "").toLowerCase();
+        let s = 0;
+        for (const tok of tokens) { if (t.includes(tok)) s += 3; if (p.includes(tok)) s += 1; }
+        return { d, s };
+    });
+    let pos = scored.filter(x => x.s > 0);
+    if (pos.length < 5) {
+        const qbi = _bigrams(ql.replace(/\s+/g, ""));
+        for (const x of scored) {
+            if (x.s > 0) continue;
+            const tb = _bigrams((x.d.title || "").toLowerCase());
+            let o = 0; for (const g of qbi) if (tb.has(g)) o++;
+            x.s = o * 0.5;
+        }
+        pos = scored.filter(x => x.s > 0);
+    }
+    pos.sort((a, b) => b.s - a.s || (b.d.mtime || 0) - (a.d.mtime || 0));
+    return pos.map(x => x.d);
+}
+
+// Gemini REST 호출 (브라우저 직접). x-goog-api-key 헤더 + CORS 허용 엔드포인트.
+async function geminiGenerate(model, promptText, maxTokens) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": getAiKey() },
+        body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens || 4096 },
+        }),
+    });
+    if (!resp.ok) {
+        let body = ""; try { body = await resp.text(); } catch (_) {}
+        throw new Error(`AI ${resp.status}: ${body.slice(0, 300) || resp.statusText}`);
+    }
+    const data = await resp.json();
+    const parts = data.candidates?.[0]?.content?.parts;
+    return parts ? parts.map(p => p.text || "").join("") : "";
+}
+
+// 후보 문서 중 질문에 가장 관련 있는 번호만 저비용 모델로 재선별.
+async function rerankDocs(query, cands) {
+    const list = cands.map((d, i) => `${i}: ${d.title} — ${d.path}`).join("\n");
+    const p = `다음은 학습 문서 후보 목록입니다. 사용자 질문에 답하는 데 가장 도움이 될 문서의 번호만 고르세요.\n\n` +
+        `질문: ${query}\n\n후보:\n${list}\n\n` +
+        `관련도 높은 순으로 최대 ${AI_MAX_DOCS}개의 번호를 JSON 배열로만 출력하세요 (예: [3,0,7]). 설명·다른 말 금지.`;
+    const out = await geminiGenerate(AI_CHEAP_MODEL, p, 200);
+    const m = out.match(/\[[\d,\s]*\]/);
+    if (!m) return [];
+    try {
+        const arr = JSON.parse(m[0]);
+        return arr.filter(n => Number.isInteger(n) && n >= 0 && n < cands.length);
+    } catch (_) { return []; }
+}
+
+// 질문 → 검색 특징(중복 제거 토큰 + 글자 바이그램). 본문 채점·단락 추출에서 공용 사용.
+function queryFeatures(query) {
+    const ql = (query || "").toLowerCase();
+    const tokens = [...new Set(
+        ql.split(/[\s,.?!()\[\]{}'"·…:;/\\、，。~"'\-]+/).filter(t => t.length >= 2)
+    )];
+    return { tokens, qbi: _bigrams(ql.replace(/\s+/g, "")) };
+}
+
+// Drive 문서 HTML → 본문 텍스트. 블록 경계마다 줄바꿈을 남겨 *단락 추출*이 가능하도록 함.
+async function fetchDocBody(doc) {
+    const html = await fetchFileContent({ id: doc.id });
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    let inner = bodyMatch ? bodyMatch[1] : html;
+    inner = inner
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+        .replace(/<img[^>]*>/gi, " ")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/(p|div|li|h[1-6]|tr|section|article|blockquote|td|th|caption)>/gi, "\n");
+    return inner.replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/[^\S\n]+/g, " ")
+        .replace(/[ \t]*\n[ \t]*/g, "\n")
+        .replace(/\n{2,}/g, "\n")
+        .trim();
+}
+
+// 본문 전체의 질문 관련도 — 등장한 *서로 다른 토큰 수(coverage)* 를 크게 가중 + 총 등장수.
+function contentScore(text, tokens) {
+    if (!text || !tokens.length) return 0;
+    const l = text.toLowerCase();
+    let cover = 0, hits = 0;
+    for (const t of tokens) {
+        const c = l.split(t).length - 1;
+        if (c > 0) { cover++; hits += Math.min(c, 5); }
+    }
+    return cover * 5 + hits;
+}
+
+// 한 줄(단락)의 점수 — 토큰 포함 여부 + 반복 등장 가중.
+function lineScore(line, tokens) {
+    const l = line.toLowerCase();
+    let s = 0;
+    for (const t of tokens) {
+        const c = l.split(t).length - 1;
+        if (c > 0) s += 2 + Math.min(2, c - 1);
+    }
+    return s;
+}
+
+// 본문에서 *질문과 관련된 단락만* 골라 budget 글자 이내로 추려 컨텍스트로. (앞부분 통째로 넣지 않음)
+function extractPassages(text, tokens, budget) {
+    const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 1);
+    if (!lines.length) return text.slice(0, budget);
+    const hits = lines
+        .map((l, i) => ({ i, s: lineScore(l, tokens) }))
+        .filter(x => x.s > 0)
+        .sort((a, b) => b.s - a.s);
+    if (!hits.length) return text.slice(0, budget) + (text.length > budget ? " …" : "");
+
+    // 점수 높은 줄 주변(±1)을 문맥과 함께 예산 안에서 수집 → 원래 순서로 복원.
+    const picked = new Map();
+    let used = 0;
+    for (const h of hits) {
+        for (let j = Math.max(0, h.i - 1); j <= Math.min(lines.length - 1, h.i + 1); j++) {
+            if (picked.has(j)) continue;
+            if (used + lines[j].length > budget && picked.size) continue;
+            picked.set(j, lines[j]);
+            used += lines[j].length;
+        }
+        if (used >= budget) break;
+    }
+    const idxs = [...picked.keys()].sort((a, b) => a - b);
+    let out = "", prev = -2;
+    for (const j of idxs) {
+        out += (j === prev + 1 ? "\n" : (out ? "\n…\n" : "")) + lines[j];
+        prev = j;
+    }
+    return out.length > budget ? out.slice(0, budget) + " …" : out;
+}
+
+function buildAnswerPrompt(query, context) {
+    return (
+        "당신은 통합 학습 도우미입니다. 아래 자료(동기화된 문서)에만 근거하여 한국어로 답변하세요.\n" +
+        "답변 시 출처를 밝히세요: 각 자료 머리의 [출처: ...] 표기를 활용해 답변 끝에 사용한 문서를 적으세요.\n" +
+        "자료에 없는 내용은 추측하지 말고 '해당 내용을 자료에서 찾을 수 없습니다.'라고 답하세요.\n" +
+        "수식은 인라인 \\( ... \\), 블록 \\[ ... \\] (MathJax/LaTeX 호환) 으로 쓰세요.\n\n" +
+        "=== 검색된 자료 ===\n" + context + "\n=================\n\n" +
+        "=== 질문 ===\n" + query
+    );
+}
+
+// ─── AI 채팅 화면 ────────────────────────────────────────────────────
+function aiAppend(role, text, sources) {
+    const chat = $('ai-chat');
+    const div = document.createElement('div');
+    div.className = 'ai-msg ai-' + role;
+    if (role === 'user' || role === 'sys') {
+        div.textContent = text;
+    } else {
+        let html = formatAnswer(text);
+        if (sources && sources.length) {
+            html += `<div class="ai-src">📄 ${sources.map(s => escapeHtml(s.title)).join(' · ')}</div>`;
+        }
+        div.innerHTML = html;
+        if (window.MathJax?.typesetPromise) window.MathJax.typesetPromise([div]).catch(() => {});
+    }
+    chat.appendChild(div);
+    window.scrollTo(0, document.body.scrollHeight);
+    return div;
+}
+function aiWait(msg) {
+    const chat = $('ai-chat');
+    const div = document.createElement('div');
+    div.className = 'ai-msg ai-wait';
+    div.innerHTML = `<span class="spinner"></span> ${escapeHtml(msg)}`;
+    chat.appendChild(div);
+    window.scrollTo(0, document.body.scrollHeight);
+    return div;
+}
+function aiWaitSet(el, msg) { if (el) el.innerHTML = `<span class="spinner"></span> ${escapeHtml(msg)}`; window.scrollTo(0, document.body.scrollHeight); }
+function aiWaitFail(el, msg) { if (el) el.innerHTML = `<span style="color:#c0392b;">⚠️ ${escapeHtml(msg)}</span>`; window.scrollTo(0, document.body.scrollHeight); }
+function aiWaitRemove(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
+
+function formatAnswer(text) {
+    let s = escapeHtml(text);
+    s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    s = s.replace(/\n/g, '<br>');
+    return s;
+}
+
+function aiGreetIfEmpty() {
+    const chat = $('ai-chat');
+    if (chat.childElementCount > 0) return;
+    if (!getAiKey()) {
+        aiAppend('sys', '먼저 우측 상단 🔑 버튼으로 Gemini API 키를 설정하세요. 동기화된 문서 내용에만 근거해 답변합니다.');
+    } else {
+        aiAppend('sys', '동기화된 문서 내용에 대해 질문하세요. 자료에 근거해 답하고 출처를 함께 보여줍니다.');
+    }
+}
+
+function clearAiChat() { $('ai-chat').innerHTML = ''; aiGreetIfEmpty(); }
+
+function openAI() {
+    show('screen-ai');
+    $('title').textContent = '🤖 문서 AI';
+    if (!history.state || history.state.screen !== 'ai') {
+        history.pushState({ screen: 'ai' }, '', '#ai');
+    }
+    aiGreetIfEmpty();
+    setTimeout(() => $('ai-input')?.focus(), 120);
+}
+
+async function askAI() {
+    if (aiBusy) return;
+    const input = $('ai-input');
+    const q = (input.value || '').trim();
+    if (!q) return;
+    if (!getAiKey()) { if (!promptAiKey()) return; }
+
+    aiBusy = true;
+    input.value = '';
+    $('ai-send').disabled = true;
+    aiAppend('user', q);
+    const wait = aiWait('질문 분석 중…');
+    try {
+        const docs = flattenDocs();
+        if (!docs.length) {
+            aiWaitFail(wait, '동기화된 문서가 없습니다. 먼저 목록 화면에서 문서를 동기화하세요.');
+            return;
+        }
+        aiWaitSet(wait, '관련 문서 검색 중…');
+        // ① 제목·경로 키워드로 후보를 넓게 추림
+        const cands = scoreDocs(docs, q).slice(0, AI_CAND);
+        if (!cands.length) {
+            aiWaitFail(wait, '질문과 관련된 문서를 찾지 못했습니다. 다른 표현으로 질문해 보세요.');
+            return;
+        }
+
+        // ② 저비용 모델 재선별로 *본문 읽을 문서* 선정 + 제목 상위를 합쳐 회수율 보강
+        let toRead = cands.slice(0, AI_READ);
+        try {
+            aiWaitSet(wait, '문서 선별 중…');
+            const picks = await rerankDocs(q, cands);
+            if (picks.length) {
+                const ranked = picks.map(i => cands[i]).filter(Boolean);
+                const seen = new Set(ranked.map(d => d.id));
+                for (const d of cands.slice(0, 6)) { if (!seen.has(d.id)) { ranked.push(d); seen.add(d.id); } }
+                toRead = ranked.slice(0, AI_READ);
+            }
+        } catch (_) { /* 재선별 실패 시 키워드 상위 사용 */ }
+
+        // ③ 본문을 실제로 읽어 *내용 점수*로 재랭킹 (제목엔 없지만 본문에 답이 있는 문서를 살림)
+        aiWaitSet(wait, `자료 읽는 중… (문서 ${toRead.length}개)`);
+        const feats = queryFeatures(q);
+        const read = (await Promise.all(toRead.map(d =>
+            fetchDocBody(d)
+                .then(text => ({ d, text, score: contentScore(text, feats.tokens) }))
+                .catch(() => null)
+        ))).filter(Boolean);
+        if (!read.length) { aiWaitFail(wait, '선택된 문서를 불러오지 못했습니다.'); return; }
+
+        read.sort((a, b) => b.score - a.score);
+        let chosen = read.filter(x => x.score > 0).slice(0, AI_MAX_DOCS);
+        if (!chosen.length) chosen = read.slice(0, AI_MAX_DOCS);  // 본문 적중 0건이면 상위라도 사용
+
+        // ④ 각 문서에서 질문 관련 단락만 추출해 컨텍스트 구성
+        const ctxParts = chosen.map(x =>
+            `[출처: ${x.d.title}] (경로: ${x.d.path})\n${extractPassages(x.text, feats.tokens, AI_DOC_CHARS)}`
+        );
+
+        aiWaitSet(wait, '답변 생성 중…');
+        const answer = await geminiGenerate(getAiModel(), buildAnswerPrompt(q, ctxParts.join('\n\n---\n\n')), 4096);
+        aiWaitRemove(wait);
+        aiAppend('ai', answer || '답변을 생성하지 못했습니다.', chosen.map(x => x.d));
+    } catch (e) {
+        aiWaitFail(wait, e.message || String(e));
+    } finally {
+        aiBusy = false;
+        $('ai-send').disabled = false;
+        input.focus();
+    }
+}
+
 // ─── 이벤트 바인딩 ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     // 저장 토큰 있으면 인증 화면 깜빡임 없이 바로 목록 화면으로
@@ -702,9 +1166,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const st = e.state || {};
         const docScreen = document.getElementById('screen-doc');
         const onDoc = docScreen && !docScreen.classList.contains('hidden');
+        const aiScreen = document.getElementById('screen-ai');
+        const onAI = aiScreen && !aiScreen.classList.contains('hidden');
 
-        if (st.screen === 'list' && onDoc) {
-            // 문서에서 ← → 목록으로 복귀
+        if (st.screen === 'list' && (onDoc || onAI)) {
+            // 문서·AI 화면에서 ← → 목록으로 복귀
             $('title').textContent = "Templum Sapientiae";
             show('screen-list');
             return;
@@ -729,6 +1195,16 @@ document.addEventListener('DOMContentLoaded', () => {
         else requestSignIn();
     });
     $('btn-install').addEventListener('click', tryInstall);
+
+    // ── 문서 AI ──
+    $('btn-ai')?.addEventListener('click', openAI);
+    $('ai-send')?.addEventListener('click', askAI);
+    $('ai-input')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askAI(); }
+    });
+    $('btn-ai-key')?.addEventListener('click', () => { promptAiKey(); });
+    $('btn-ai-model')?.addEventListener('click', () => { promptAiModel(); });
+    $('btn-ai-clear')?.addEventListener('click', clearAiChat);
 
     // 검색 — 입력하는 동안 즉시 필터링
     const searchInput = $('search-input');

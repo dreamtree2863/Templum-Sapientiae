@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 // 버전 — 셸 파일 갱신 시 bump (예: -v2, -v3 …)
-const SHELL_CACHE = "templum-shell-v4";  // 캐시 invalidate (모바일 먹통 해결)
+const SHELL_CACHE = "templum-shell-v5";  // 문서 AI(Q&A) 추가 — 셸 갱신
 const DOC_CACHE = "templum-docs-v2";     // 문서 캐시도 초기화 — 새 추출본 형식 반영
 
 const SHELL_FILES = [
