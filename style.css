@@ -142,6 +142,21 @@ html, body { margin: 0; padding: 0; font-family: -apple-system, 'Malgun Gothic',
 .item-card .doc-btn:active { background: #e8dec8; }
 .item-card .doc-btn:disabled { background: #f4f4f4; color: #bbb; border-color: #e8e8e8; }
 
+.doc-audiobar {
+    position: sticky; top: 56px; z-index: 5;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: #fdfbf7; padding: 8px 0 10px;
+}
+.audio-btn {
+    padding: 9px 14px; border-radius: 22px; cursor: pointer;
+    background: #1b263b; color: #fff; border: 0;
+    font-size: 14px; font-weight: 700;
+}
+.audio-btn.tts { background: #c19a6b; }
+.audio-btn:active { opacity: .85; }
+.audio-btn:disabled { background: #b9b9b9; }
+.doc-audio { width: 100%; margin: 2px 0; }
+
 #doc-content { background: #fff; padding: 18px; border-radius: 8px; }
 #doc-content img { max-width: 100%; height: auto; }
 #doc-content figure { text-align: center; }

@@ -15,7 +15,20 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v5";  // v5: 문서 목록 캐시 초기화 — 수정/신규 문서(쟁점 종합본·목차본·요약본) 반영
+const CACHE_KEY = "templum.docList.v6";  // v6: 낭독 오디오(mp3) 수집·연결 — 음성파일 재생 지원
+
+// 낭독 오디오 확장자 (데스크톱 tts_common.AUDIO_EXTS 와 동일)
+const AUDIO_RE = /\.(mp3|m4a|wav|ogg|opus|aac|flac|wma)$/i;
+// 오디오 파일명 → 문서 stem 정규화: 확장자·'_낭독'/' 낭독' 접미사 제거 후 NFC 소문자
+function audioStem(name) {
+    let s = name.replace(AUDIO_RE, "");
+    s = s.replace(/(_| )낭독$/, "");
+    return s.normalize("NFC").toLowerCase();
+}
+// 문서(html) 파일명 → stem (확장자 제거 후 NFC 소문자) — 오디오 매칭 키
+function docStem(name) {
+    return name.replace(/\.html?$/i, "").normalize("NFC").toLowerCase();
+}
 const TOKEN_KEY = "templum.googleAccessToken";
 const EXPANDED_KEY = "templum.expanded.v1";  // 펼친 폴더 경로 집합
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
@@ -275,13 +288,14 @@ async function listAllFilesUnder(folderId, onBatch) {
             for (const f of (res.files || [])) {
                 if (f.mimeType === "application/vnd.google-apps.folder") {
                     stack.push({ id: f.id, path: [...path, f.name] });
-                } else if (/\.html?$/i.test(f.name)) {
+                } else if (/\.html?$/i.test(f.name) || AUDIO_RE.test(f.name)) {
                     batch.push({
                         id: f.id,
                         name: f.name,
                         mtime: Date.parse(f.modifiedTime),
                         size: Number(f.size) || 0,
                         path: path.join("/"),  // Templum 내부 상대 경로
+                        isAudio: AUDIO_RE.test(f.name),
                     });
                 }
             }
@@ -330,10 +344,16 @@ async function loadDocuments(hasCache = false) {
     // 점진적 수집 — 폴더 받을 때마다 그룹화 + 부분 렌더
     const groups = {};                                  // archive: subject → groupKey → item
     const encTree = { folders: {}, files: [] };         // encyclopedia: 폴더 트리
+    const audioByKey = {};                              // "path|stem" → {id,name,mtime} (낭독 오디오)
     let totalSoFar = 0;
 
     await listAllFilesUnder(state.rootFolderId, (batch) => {
         for (const f of batch) {
+            if (f.isAudio) {
+                // 낭독 오디오 — 같은 폴더·같은 stem 의 문서에 연결하기 위해 보관
+                audioByKey[`${f.path}|${audioStem(f.name)}`] = { id: f.id, name: f.name, mtime: f.mtime };
+                continue;
+            }
             const info = classify(f);
             const segs = f.path.split("/").filter(Boolean);
 
@@ -378,13 +398,29 @@ async function loadDocuments(hasCache = false) {
         }
     });
 
+    // 낭독 오디오를 같은 폴더·같은 stem 의 문서에 연결 (file.audio = {id,name})
+    const linkAudio = (file) => {
+        const a = audioByKey[`${file.path}|${docStem(file.name)}`];
+        if (a) file.audio = { id: a.id, name: a.name };
+    };
+    for (const subj of Object.keys(groups)) {
+        for (const it of Object.values(groups[subj])) {
+            for (const k of Object.keys(it.files)) linkAudio(it.files[k]);
+        }
+    }
+    (function walkTree(node) {
+        for (const f of (node.files || [])) linkAudio(f);
+        for (const sub of Object.values(node.folders || {})) walkTree(sub);
+    })(encTree);
+
     state.grouped = groups;
     state.encyclopediaTree = encTree;
     state.fetchedAt = Date.now();
     state.refreshing = false;
     saveCache();
     renderList();
-    setStatus(`✅ ${totalSoFar}개 파일 동기화 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
+    const audioCount = Object.keys(audioByKey).length;
+    setStatus(`✅ ${totalSoFar}개 파일 동기화 완료${audioCount ? ` (🔊 음성 ${audioCount})` : ""} (${new Date().toLocaleTimeString('ko-KR')})`);
 }
 
 // encyclopedia 트리에 파일 추가 — 폴더 세그먼트 따라 재귀로 들어가며 노드 생성
@@ -707,6 +743,7 @@ function labelOf(kind) {
 // ─── 문서 열람 ──────────────────────────────────────────────────────
 async function openDocument(file) {
     show('screen-doc');
+    stopDocPlayback();
     $('title').textContent = file.name;
     $('doc-content').innerHTML = `<div class="hint"><span class="spinner"></span> 문서 로드 중…</div>`;
 
@@ -715,6 +752,7 @@ async function openDocument(file) {
     if (!history.state || history.state.screen !== 'doc') {
         history.pushState({ screen: 'doc' }, '', '#doc');
     }
+    setupAudioBar(file);
     try {
         const html = await fetchFileContent(file);
         // body 내용만 추출 (외부 HTML 의 head/style 은 무시 — 안전성 ↑)
@@ -728,6 +766,103 @@ async function openDocument(file) {
     } catch (e) {
         $('doc-content').innerHTML = `<div class="hint" style="color:#c0392b;">오류: ${escapeHtml(e.message)}</div>`;
     }
+}
+
+// ─── 낭독 / 저장된 음성파일 재생 ────────────────────────────────────
+let _docAudioEl = null;     // 현재 <audio> 엘리먼트
+let _docBlobUrl = null;     // 현재 blob: URL (재생 종료 시 해제)
+let _speaking = false;      // Web Speech 낭독 진행중 여부
+
+// 문서를 떠나거나 새 문서를 열 때 — 재생/낭독 전부 정지 + 리소스 해제
+function stopDocPlayback() {
+    try { if (_docAudioEl) { _docAudioEl.pause(); _docAudioEl.src = ""; } } catch (_) {}
+    _docAudioEl = null;
+    if (_docBlobUrl) { try { URL.revokeObjectURL(_docBlobUrl); } catch (_) {} _docBlobUrl = null; }
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (_) {} }
+    _speaking = false;
+}
+
+// 문서 상단 컨트롤 바 구성: (있으면) 저장된 음성 재생 + 브라우저 낭독
+function setupAudioBar(file) {
+    const bar = $('doc-audiobar');
+    if (!bar) return;
+    bar.innerHTML = "";
+    bar.style.display = "";
+
+    // ① 저장된 음성파일(낭독 mp3) — 데스크톱에서 생성·Drive 동기화된 파일
+    if (file && file.audio) {
+        const loadBtn = document.createElement('button');
+        loadBtn.className = "audio-btn";
+        loadBtn.textContent = "🔊 저장된 음성 재생";
+        loadBtn.addEventListener('click', () => playSavedAudio(file.audio, bar, loadBtn));
+        bar.appendChild(loadBtn);
+    }
+
+    // ② 브라우저 낭독 (Web Speech) — 저장 음성이 없어도 본문을 읽어줌
+    if ('speechSynthesis' in window) {
+        const ttsBtn = document.createElement('button');
+        ttsBtn.className = "audio-btn tts";
+        ttsBtn.textContent = "📖 낭독";
+        ttsBtn.addEventListener('click', () => toggleSpeak(ttsBtn));
+        bar.appendChild(ttsBtn);
+    }
+
+    if (!bar.childElementCount) bar.style.display = "none";
+}
+
+// 저장된 mp3 를 Drive 에서 blob 으로 받아 <audio> 로 재생 (인증 헤더 필요 → 직접 src 불가)
+async function playSavedAudio(audio, bar, loadBtn) {
+    stopDocPlayback();
+    loadBtn.disabled = true;
+    loadBtn.textContent = "⏳ 음성 불러오는 중…";
+    try {
+        const url = `https://www.googleapis.com/drive/v3/files/${audio.id}?alt=media`;
+        const resp = await fetch(url, { headers: { "Authorization": "Bearer " + state.accessToken } });
+        if (!resp.ok) throw new Error("음성 다운로드 " + resp.status);
+        const blob = await resp.blob();
+        _docBlobUrl = URL.createObjectURL(blob);
+        const el = document.createElement('audio');
+        el.controls = true;
+        el.autoplay = true;
+        el.className = "doc-audio";
+        el.src = _docBlobUrl;
+        _docAudioEl = el;
+        loadBtn.replaceWith(el);
+        el.play().catch(() => {});
+    } catch (e) {
+        loadBtn.disabled = false;
+        loadBtn.textContent = "⚠️ 재생 실패 — 다시 시도";
+    }
+}
+
+// 브라우저 내장 음성으로 본문 낭독 (토글). 긴 글은 문장 단위로 끊어 큐잉.
+function toggleSpeak(btn) {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    if (_speaking) {
+        synth.cancel();
+        _speaking = false;
+        btn.textContent = "📖 낭독";
+        return;
+    }
+    // 저장 음성이 돌고 있으면 멈춤
+    if (_docAudioEl) { try { _docAudioEl.pause(); } catch (_) {} }
+    const text = ($('doc-content').innerText || "").replace(/\s+/g, " ").trim();
+    if (!text) return;
+    const chunks = text.match(/[^.!?。…\n]+[.!?。…]?/g) || [text];
+    let i = 0;
+    const speakNext = () => {
+        if (i >= chunks.length) { _speaking = false; btn.textContent = "📖 낭독"; return; }
+        const u = new SpeechSynthesisUtterance(chunks[i++]);
+        u.lang = "ko-KR";
+        u.rate = 0.95;
+        u.onend = speakNext;
+        u.onerror = () => { _speaking = false; btn.textContent = "📖 낭독"; };
+        synth.speak(u);
+    };
+    _speaking = true;
+    btn.textContent = "⏹ 낭독 멈춤";
+    speakNext();
 }
 
 async function fetchFileContent(file) {
@@ -1171,6 +1306,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (st.screen === 'list' && (onDoc || onAI)) {
             // 문서·AI 화면에서 ← → 목록으로 복귀
+            stopDocPlayback();
             $('title').textContent = "Templum Sapientiae";
             show('screen-list');
             return;
