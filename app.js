@@ -15,7 +15,7 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v4";  // v4: archive 형식/과목 폴더 구조 변경(형식 무관 그룹화) 반영
+const CACHE_KEY = "templum.docList.v5";  // v5: 문서 목록 캐시 초기화 — 수정/신규 문서(쟁점 종합본·목차본·요약본) 반영
 const TOKEN_KEY = "templum.googleAccessToken";
 const EXPANDED_KEY = "templum.expanded.v1";  // 펼친 폴더 경로 집합
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;  // 24시간 — 그 후엔 자동 재조회
