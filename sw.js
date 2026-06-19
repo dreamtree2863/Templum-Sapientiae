@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 // 버전 — 셸 파일 갱신 시 bump (예: -v2, -v3 …)
-const SHELL_CACHE = "templum-shell-v8";  // v8: 낭독 오디오 연결 강제 재조회(docList v7) — 셸 갱신
+const SHELL_CACHE = "templum-shell-v9";  // v9: 일반 낭독을 데스크톱 tts_common 규칙대로 정규화 — 셸 갱신
 const DOC_CACHE = "templum-docs-v3";     // v3: 문서 캐시 초기화 — 수정/신규 문서 즉시 픽업
 
 const SHELL_FILES = [
