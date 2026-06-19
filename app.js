@@ -15,7 +15,7 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v6";  // v6: 낭독 오디오(mp3) 수집·연결 — 음성파일 재생 지원
+const CACHE_KEY = "templum.docList.v7";  // v7: 낭독 오디오 연결 강제 재조회 — 오디오 없던 시절 굳은 목록 캐시 무효화
 
 // 낭독 오디오 확장자 (데스크톱 tts_common.AUDIO_EXTS 와 동일)
 const AUDIO_RE = /\.(mp3|m4a|wav|ogg|opus|aac|flac|wma)$/i;
