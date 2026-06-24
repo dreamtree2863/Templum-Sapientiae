@@ -15,7 +15,7 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v8";  // v8: no-store 동기화 + 오디오 스트리밍 — 옛 목록 캐시 무효화
+const CACHE_KEY = "templum.docList.v9";  // v9: 평면 파일목록+폴더맵 저장 → 증분 동기화 지원
 
 // 낭독 오디오 확장자 (데스크톱 tts_common.AUDIO_EXTS 와 동일)
 const AUDIO_RE = /\.(mp3|m4a|wav|ogg|opus|aac|flac|wma)$/i;
@@ -185,15 +185,18 @@ async function onSignedIn() {
     show('screen-list');
     postTokenToSW();   // 오디오 스트리밍용 토큰을 SW 에 미리 전달
 
-    // 1) 캐시가 있으면 *즉시* 표시 (UX 우선)
+    // 1) 캐시가 있으면 *즉시* 표시 (UX 우선) — 평면목록에서 그룹 즉석 재구성
     const cached = loadCache();
     if (cached) {
-        state.grouped = cached.grouped;
-        state.encyclopediaTree = cached.encyclopediaTree || { folders: {}, files: [] };
+        state.allFiles = cached.allFiles;
+        state.folderMap = cached.folderMap || {};
         state.fetchedAt = cached.fetchedAt;
+        const { grouped, encTree } = buildGroupsFromFiles(state.allFiles);
+        state.grouped = grouped;
+        state.encyclopediaTree = encTree;
         renderList();
         setStatus(
-            `📦 캐시에서 즉시 표시 (총 ${cached.totalFiles}개 파일, ${fmtTimeSince(cached.fetchedAt)} 전 동기화) — 백그라운드 새로고침 중…`
+            `📦 캐시에서 즉시 표시 (총 ${cached.allFiles.length}개 파일, ${fmtTimeSince(cached.fetchedAt)} 전 동기화) — 변경 확인 중…`
         );
     } else {
         setStatus("Drive 폴더 검색 중…");
@@ -221,21 +224,20 @@ function loadCache() {
         const raw = localStorage.getItem(CACHE_KEY);
         if (!raw) return null;
         const data = JSON.parse(raw);
-        if (!data || !data.grouped) return null;
+        if (!data || !Array.isArray(data.allFiles)) return null;  // v9: 평면 파일목록 기반
         return data;
     } catch (_) { return null; }
 }
 
+// 캐시는 '평면 파일목록(allFiles) + 폴더맵(folderMap)' 만 저장하고,
+// 화면용 그룹/트리는 매번 buildGroupsFromFiles 로 즉석 재구성한다(증분 갱신과 단일 소스).
 function saveCache() {
     try {
-        const totalFiles = Object.values(state.grouped).reduce(
-            (sum, items) => sum + Object.values(items).reduce(
-                (s, it) => s + Object.keys(it.files).length, 0), 0);
         const payload = {
-            grouped: state.grouped,
-            encyclopediaTree: state.encyclopediaTree,
+            allFiles: state.allFiles || [],
+            folderMap: state.folderMap || {},
             fetchedAt: state.fetchedAt,
-            totalFiles,
+            totalFiles: (state.allFiles || []).length,
         };
         localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
     } catch (_) { /* 용량 초과 등 — 조용히 무시 */ }
@@ -266,30 +268,96 @@ async function fetchStartPageToken() {
     return r.startPageToken || "";
 }
 
-// 저장 토큰 이후 변경이 있었는지 확인하고 토큰을 전진시킨다. 반환 true = 변경 있음(재스캔 필요).
-async function driveHasChanges() {
+// 저장 토큰 이후의 *변경 파일 목록* 을 반환(생성/수정/삭제)하고 토큰을 전진시킨다.
+//   반환 [] = 변경 없음. throw = 토큰 만료 등(호출부에서 전체 스캔으로 폴백).
+async function driveFetchChanges() {
     let token = getChangesToken();
-    if (!token) return true;                       // 베이스라인 없음 → 전체 스캔
-    let changed = false, guard = 0;
+    const entries = [];
+    if (!token) return entries;
+    let guard = 0;
     try {
-        while (token && guard++ < 50) {
+        while (token && guard++ < 100) {
             const r = await driveFetch("changes", {
                 pageToken: token,
                 pageSize: 200,
                 restrictToMyDrive: "true",
-                fields: "newStartPageToken,nextPageToken,changes(fileId,removed)",
+                fields: "newStartPageToken,nextPageToken,changes(fileId,removed,file(id,name,mimeType,modifiedTime,size,parents,trashed))",
             });
-            if ((r.changes || []).length) changed = true;
+            for (const c of (r.changes || [])) entries.push(c);
             if (r.nextPageToken) { token = r.nextPageToken; continue; }
-            if (r.newStartPageToken) setChangesToken(r.newStartPageToken);  // 베이스라인 전진
+            if (r.newStartPageToken) setChangesToken(r.newStartPageToken);
             break;
         }
-    } catch (_) {
-        // 토큰 만료(404) 등 → 베이스라인 폐기하고 전체 스캔(이후 새 토큰 재확보)
-        try { localStorage.removeItem(CHANGES_TOKEN_KEY); } catch (__) {}
-        return true;
+    } catch (e) {
+        try { localStorage.removeItem(CHANGES_TOKEN_KEY); } catch (_) {}
+        throw e;
     }
-    return changed;
+    return entries;
+}
+
+// 폴더 id 의 Templum 내부 상대경로 해석. 모르는 폴더는 files.get 으로 학습.
+//   반환 문자열 = Templum 하위 경로, null = Templum 밖(무관 파일).
+async function resolvePathLive(parentId) {
+    const fmap = state.folderMap || (state.folderMap = {});
+    const rootId = state.rootFolderId;
+    const parts = [];
+    let cur = parentId, guard = 0;
+    while (cur && cur !== rootId && guard++ < 40) {
+        let node = fmap[cur];
+        if (!node) {
+            try {
+                const r = await driveFetch("files/" + cur, { fields: "id,name,parents" });
+                node = { name: r.name, parentId: (r.parents && r.parents[0]) || null };
+                fmap[cur] = node;   // 새 폴더 학습 → 이후 즉시 해석
+            } catch (_) { return null; }
+        }
+        parts.unshift(node.name);
+        cur = node.parentId;
+    }
+    return (cur === rootId) ? parts.join("/") : null;
+}
+
+// 변경 목록을 캐시(allFiles)에 증분 반영. 폴더 구조 변경 등 불확실하면 false → 호출부가 전체 스캔.
+async function applyDriveChanges(entries) {
+    if (!state.allFiles || !state.folderMap) return false;
+    const byId = new Map(state.allFiles.map(f => [f.id, f]));
+    const fmap = state.folderMap;
+    for (const c of entries) {
+        const id = c.fileId || (c.file && c.file.id);
+        if (!id) continue;
+        const f = c.file;
+        const removed = c.removed || (f && f.trashed);
+        if (removed) {
+            if (fmap[id]) return false;     // 추적 폴더 삭제 → 하위 경로 영향 → 전체 스캔
+            byId.delete(id);                // 파일 삭제(아니면 무해)
+            continue;
+        }
+        if (!f) continue;
+        if (f.mimeType === "application/vnd.google-apps.folder") {
+            const under = !!fmap[id] || (await resolvePathLive((f.parents && f.parents[0]) || null)) !== null;
+            if (under) return false;        // Templum 폴더 생성/이름변경/이동 → 전체 스캔
+            continue;                       // 무관 폴더 → 무시
+        }
+        // 파일
+        if (!(/\.html?$/i.test(f.name) || AUDIO_RE.test(f.name))) { byId.delete(id); continue; }
+        const path = await resolvePathLive((f.parents && f.parents[0]) || null);
+        if (path === null) { byId.delete(id); continue; }   // Templum 밖(또는 밖으로 이동) → 제거
+        byId.set(id, {
+            id, name: f.name,
+            mtime: Date.parse(f.modifiedTime) || 0,
+            size: Number(f.size) || 0,
+            path,
+            isAudio: AUDIO_RE.test(f.name),
+        });
+    }
+    state.allFiles = Array.from(byId.values());
+    const { grouped, encTree } = buildGroupsFromFiles(state.allFiles);
+    state.grouped = grouped;
+    state.encyclopediaTree = encTree;
+    state.fetchedAt = Date.now();
+    saveCache();
+    renderList();
+    return true;
 }
 
 // ─── Drive API ───────────────────────────────────────────────────────
@@ -322,9 +390,10 @@ async function findFolderByName(name, parentId) {
     return res.files?.[0]?.id || null;
 }
 
-async function listAllFilesUnder(folderId, onBatch) {
-    /** 하위 폴더까지 재귀로 HTML 파일 전부 수집.
-        onBatch(batch[]) 콜백이 있으면 각 폴더 페이지를 받을 때마다 호출 — 점진적 렌더링. */
+async function listAllFilesUnder(folderId, onBatch, onFolder) {
+    /** 하위 폴더까지 재귀로 HTML/오디오 파일 전부 수집.
+        onBatch(batch[]) — 각 페이지마다 호출(진행표시).
+        onFolder({id,name,parentId}) — 폴더 발견 시 호출(폴더맵 구축 → 증분 동기화용). */
     const stack = [{ id: folderId, path: [] }];
     while (stack.length) {
         const { id, path } = stack.pop();
@@ -341,6 +410,7 @@ async function listAllFilesUnder(folderId, onBatch) {
             for (const f of (res.files || [])) {
                 if (f.mimeType === "application/vnd.google-apps.folder") {
                     stack.push({ id: f.id, path: [...path, f.name] });
+                    if (onFolder) onFolder({ id: f.id, name: f.name, parentId: id });
                 } else if (/\.html?$/i.test(f.name) || AUDIO_RE.test(f.name)) {
                     batch.push({
                         id: f.id,
@@ -390,106 +460,96 @@ function classify(file) {
     return { kind: "plain", label: "열기", baseTitle: file.name.replace(/\.html?$/i, "") };
 }
 
-async function loadDocuments(hasCache = false) {
-    state.refreshing = true;
-
-    // 변경 감지: 캐시 + 베이스라인 토큰이 있으면, 변경 없을 때 전체 스캔을 건너뛴다(즉시).
-    //   (🔄 새로고침은 hasCache=false 로 호출되어 항상 강제 전체 스캔)
-    if (hasCache && getChangesToken()) {
-        try {
-            if (!(await driveHasChanges())) {
-                state.refreshing = false;
-                setStatus(`✅ 변경 없음 — 캐시 사용 (${fmtTimeSince(state.fetchedAt)} 전 동기화)`);
-                return;
-            }
-            setStatus("변경 감지 — 목록 갱신 중…");
-        } catch (_) { /* 변경 API 실패 → 평소대로 전체 스캔 */ }
-    }
-
-    if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
-
-    // 점진적 수집 — 폴더 받을 때마다 그룹화 + 부분 렌더
+// 평면 파일목록(allFiles) → 화면용 그룹/트리 재구성 (전체스캔·증분·캐시복원 공용)
+function buildGroupsFromFiles(files) {
     const groups = {};                                  // archive: subject → groupKey → item
     const encTree = { folders: {}, files: [] };         // encyclopedia: 폴더 트리
-    const audioByKey = {};                              // "path|stem" → {id,name,mtime} (낭독 오디오)
-    let totalSoFar = 0;
-
-    await listAllFilesUnder(state.rootFolderId, (batch) => {
-        for (const f of batch) {
-            if (f.isAudio) {
-                // 낭독 오디오 — 같은 폴더·같은 stem 의 문서에 연결하기 위해 보관
-                audioByKey[`${f.path}|${audioStem(f.name)}`] = { id: f.id, name: f.name, mtime: f.mtime };
-                continue;
-            }
-            const info = classify(f);
-            const segs = f.path.split("/").filter(Boolean);
-
-            if (segs[0] === "encyclopedia") {
-                // encyclopedia 는 *폴더 트리* 로 — 깊은 계층 그대로 보존
-                const folderSegs = segs.slice(1);  // "encyclopedia" 제외
-                addFileToTree(encTree, folderSegs, {
-                    id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path,
-                    baseTitle: info.baseTitle, kind: info.kind, label: info.label,
-                });
-            } else {
-                // archive 구조: archive/{형식}/{과목}/{책폴더}/...  (2026-06 폴더 구조 변경)
-                //   · 과목(subject)=segs[2], 책폴더(book)=segs[3].
-                //   · 같은 시험의 문제/종합/요약/채점 파일이 형식 폴더로 흩어지므로,
-                //     형식을 제외한 (과목|책폴더|제목) 으로 묶어 한 카드에 모은다.
-                let subject = "기타", book = "";
-                if (segs[0] === "archive") {
-                    subject = segs[2] || segs[1] || "기타";
-                    book = segs[3] || "";
-                } else if (segs[0]) {
-                    subject = segs[0];
-                    book = segs[1] || "";
-                }
-
-                const groupKey = `${subject}|${book}|${info.baseTitle}`;
-                groups[subject] = groups[subject] || {};
-                const item = groups[subject][groupKey] = groups[subject][groupKey] || {
-                    subject, book, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
-                };
-                item.files[info.kind] = {
-                    id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label,
-                };
-                if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
-            }
+    const audioByKey = {};                              // "path|stem" → {id,name,mtime}
+    for (const f of (files || [])) {
+        if (f.isAudio) {
+            audioByKey[`${f.path}|${audioStem(f.name)}`] = { id: f.id, name: f.name, mtime: f.mtime };
+            continue;
         }
-        totalSoFar += batch.length;
-        if (!hasCache) {
-            state.grouped = groups;
-            state.encyclopediaTree = encTree;
-            renderList();
-            setStatus(`📥 동기화 중… ${totalSoFar}개 수집됨`);
+        const info = classify(f);
+        const segs = f.path.split("/").filter(Boolean);
+        if (segs[0] === "encyclopedia") {
+            addFileToTree(encTree, segs.slice(1), {
+                id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path,
+                baseTitle: info.baseTitle, kind: info.kind, label: info.label,
+            });
+        } else {
+            let subject = "기타", book = "";
+            if (segs[0] === "archive") { subject = segs[2] || segs[1] || "기타"; book = segs[3] || ""; }
+            else if (segs[0]) { subject = segs[0]; book = segs[1] || ""; }
+            const groupKey = `${subject}|${book}|${info.baseTitle}`;
+            groups[subject] = groups[subject] || {};
+            const item = groups[subject][groupKey] = groups[subject][groupKey] || {
+                subject, book, baseTitle: info.baseTitle, files: {}, latestMtime: 0, path: f.path,
+            };
+            item.files[info.kind] = { id: f.id, name: f.name, mtime: f.mtime, size: f.size, path: f.path, label: info.label };
+            if (f.mtime > item.latestMtime) item.latestMtime = f.mtime;
         }
-    });
-
-    // 낭독 오디오를 같은 폴더·같은 stem 의 문서에 연결 (file.audio = {id,name})
+    }
+    // 낭독 오디오 연결
     const linkAudio = (file) => {
         const a = audioByKey[`${file.path}|${docStem(file.name)}`];
         if (a) file.audio = { id: a.id, name: a.name };
     };
-    for (const subj of Object.keys(groups)) {
-        for (const it of Object.values(groups[subj])) {
+    for (const subj of Object.keys(groups))
+        for (const it of Object.values(groups[subj]))
             for (const k of Object.keys(it.files)) linkAudio(it.files[k]);
-        }
-    }
-    (function walkTree(node) {
+    (function walk(node) {
         for (const f of (node.files || [])) linkAudio(f);
-        for (const sub of Object.values(node.folders || {})) walkTree(sub);
+        for (const sub of Object.values(node.folders || {})) walk(sub);
     })(encTree);
+    return { grouped: groups, encTree };
+}
 
-    state.grouped = groups;
+async function loadDocuments(hasCache = false) {
+    state.refreshing = true;
+
+    // ① 증분 동기화: 캐시 + 베이스라인 토큰이 있으면, *변경된 파일만* 반영(전체 스캔 회피).
+    //    (🔄 새로고침은 hasCache=false → 항상 강제 전체 스캔)
+    if (hasCache && getChangesToken() && state.allFiles && state.folderMap) {
+        try {
+            const changes = await driveFetchChanges();      // 변경 목록 + 토큰 전진
+            if (!changes.length) {
+                state.refreshing = false;
+                setStatus(`✅ 변경 없음 — 캐시 사용 (${fmtTimeSince(state.fetchedAt)} 전 동기화)`);
+                return;
+            }
+            setStatus(`변경 ${changes.length}건 확인 — 반영 중…`);
+            if (await applyDriveChanges(changes)) {          // 파일만 변경 → 증분 반영 성공
+                state.refreshing = false;
+                setStatus(`✅ 변경 ${changes.length}건 반영 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
+                return;
+            }
+            setStatus("폴더 구조 변경 감지 — 전체 갱신 중…");   // 폴더 변경 등 → 전체 스캔으로
+        } catch (_) { /* 변경 API 실패(토큰 만료 등) → 전체 스캔 */ }
+    }
+
+    // ② 전체 스캔 — 평면 파일목록 + 폴더맵 수집 후 그룹 재구성
+    if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
+    const allFiles = [];
+    const folderMap = {};
+    await listAllFilesUnder(state.rootFolderId,
+        (batch) => { for (const f of batch) allFiles.push(f); if (!hasCache) setStatus(`📥 동기화 중… ${allFiles.length}개 수집됨`); },
+        (folder) => { folderMap[folder.id] = { name: folder.name, parentId: folder.parentId }; }
+    );
+
+    state.allFiles = allFiles;
+    state.folderMap = folderMap;
+    const { grouped, encTree } = buildGroupsFromFiles(allFiles);
+    state.grouped = grouped;
     state.encyclopediaTree = encTree;
     state.fetchedAt = Date.now();
     state.refreshing = false;
     saveCache();
-    // 전체 스캔 직후 변경감지 베이스라인 확보(없을 때만) → 다음 실행부터 변경 없으면 스캔 생략
-    try { if (!getChangesToken()) setChangesToken(await fetchStartPageToken()); } catch (_) {}
+    // 전체 스캔 기준으로 변경감지 베이스라인을 '지금'으로 재설정 → 다음부턴 증분만
+    try { setChangesToken(await fetchStartPageToken()); } catch (_) {}
     renderList();
-    const audioCount = Object.keys(audioByKey).length;
-    setStatus(`✅ ${totalSoFar}개 파일 동기화 완료${audioCount ? ` (🔊 음성 ${audioCount})` : ""} (${new Date().toLocaleTimeString('ko-KR')})`);
+    const audioCount = allFiles.filter(f => f.isAudio).length;
+    setStatus(`✅ ${allFiles.length}개 파일 동기화 완료${audioCount ? ` (🔊 음성 ${audioCount})` : ""} (${new Date().toLocaleTimeString('ko-KR')})`);
 }
 
 // encyclopedia 트리에 파일 추가 — 폴더 세그먼트 따라 재귀로 들어가며 노드 생성
