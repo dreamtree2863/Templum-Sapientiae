@@ -7,8 +7,8 @@
 //   · 모든 Drive fetch 는 cache:'no-store' → 브라우저 HTTP 캐시가 옛 내용을 주지 못함
 // ─────────────────────────────────────────────────────────────────────
 
-// 버전 — 셸/문서 캐시 갱신 시 bump. v11: 변경감지 게이트(app.js) 반영 위해 SW bump → 업데이트 토스트 노출
-const SHELL_CACHE = "templum-shell-v11";
+// 버전 — 셸/문서 캐시 갱신 시 bump. v12: 이미지 지연로딩(렌더 가속) 반영
+const SHELL_CACHE = "templum-shell-v12";
 const DOC_CACHE = "templum-docs-v4";
 
 const SHELL_FILES = [

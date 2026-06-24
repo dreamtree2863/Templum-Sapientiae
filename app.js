@@ -810,6 +810,46 @@ function labelOf(kind) {
 }
 
 // ─── 문서 열람 ──────────────────────────────────────────────────────
+// ─── 이미지 지연로딩 ────────────────────────────────────────────────
+//   백과 HTML 은 그림이 base64 로 *통째 박혀* 있어, innerHTML 에 넣는 순간
+//   브라우저가 수백 장을 한꺼번에 디코드 → 렌더가 느리다(특히 폰).
+//   해결: HTML 문자열에서 <img src="data:..."> 의 base64 를 src 가 아닌
+//   data-lazy 로 옮겨(=디코드 안 함) 넣고, 스크롤로 화면에 가까워질 때만
+//   src 로 되돌려 그때 1장씩 디코드한다. (다운로드가 아니라 *디코드* 를 미룸)
+let _lazyIO = null;
+function lazifyHtml(htmlStr) {
+    return htmlStr.replace(
+        /<img\b([^>]*?)\ssrc=(["'])(data:[^"']*)\2([^>]*)>/gi,
+        (m, pre, q, data, post) => `<img${pre} data-lazy="${data}"${post}>`
+    );
+}
+function observeLazyImages(root) {
+    if (_lazyIO) { try { _lazyIO.disconnect(); } catch (_) {} _lazyIO = null; }
+    const imgs = root.querySelectorAll('img[data-lazy]');
+    if (!imgs.length) return;
+    const reveal = (img) => {
+        const data = img.getAttribute('data-lazy');
+        if (!data) return;
+        img.removeAttribute('data-lazy');
+        img.addEventListener('load', () => { img.style.minHeight = ''; img.style.background = ''; }, { once: true });
+        img.src = data;
+    };
+    if (!('IntersectionObserver' in window)) { imgs.forEach(reveal); return; }
+    _lazyIO = new IntersectionObserver((entries, obs) => {
+        for (const e of entries) {
+            if (!e.isIntersecting) continue;
+            reveal(e.target);
+            obs.unobserve(e.target);
+        }
+    }, { rootMargin: "500px 0px" });   // 화면에 들어오기 약간 전에 미리 디코드
+    imgs.forEach(img => {
+        // 자리 확보(레이아웃 점프·동시 노출 방지) — 디코드되면 해제
+        img.style.minHeight = "140px";
+        img.style.background = "#f4efe2";
+        _lazyIO.observe(img);
+    });
+}
+
 async function openDocument(file) {
     show('screen-doc');
     stopDocPlayback();
@@ -827,8 +867,9 @@ async function openDocument(file) {
         state.currentDocHtml = html;   // 📖 낭독이 원본 HTML 에서 규칙대로 정규화하도록 보관
         // body 내용만 추출 (외부 HTML 의 head/style 은 무시 — 안전성 ↑)
         const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        const inner = bodyMatch ? bodyMatch[1] : html;
+        const inner = lazifyHtml(bodyMatch ? bodyMatch[1] : html);
         $('doc-content').innerHTML = inner;
+        observeLazyImages($('doc-content'));   // 그림은 화면에 들어올 때만 디코드
         // MathJax 재실행 (수식 렌더)
         if (window.MathJax?.typesetPromise) {
             window.MathJax.typesetPromise([$('doc-content')]).catch(() => {});
@@ -845,6 +886,7 @@ let _speaking = false;      // Web Speech 낭독 진행중 여부
 
 // 문서를 떠나거나 새 문서를 열 때 — 재생/낭독 전부 정지 + 리소스 해제
 function stopDocPlayback() {
+    if (_lazyIO) { try { _lazyIO.disconnect(); } catch (_) {} _lazyIO = null; }
     try { if (_docAudioEl) { _docAudioEl.pause(); _docAudioEl.src = ""; } } catch (_) {}
     _docAudioEl = null;
     if (_docBlobUrl) { try { URL.revokeObjectURL(_docBlobUrl); } catch (_) {} _docBlobUrl = null; }
