@@ -15,7 +15,9 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v9";  // v9: 평면 파일목록+폴더맵 저장 → 증분 동기화 지원
+// ⚠️ 이 키는 *스키마가 바뀔 때만* bump 한다. 그냥 앱(코드) 갱신마다 올리면
+//    캐시가 버려져 전체 재스캔이 강제된다. 앱 갱신은 sw.js 의 SHELL_CACHE 만 올릴 것.
+const CACHE_KEY = "templum.docList.v9";  // v9: 평면 파일목록+폴더맵 저장 → 증분 동기화
 
 // 낭독 오디오 확장자 (데스크톱 tts_common.AUDIO_EXTS 와 동일)
 const AUDIO_RE = /\.(mp3|m4a|wav|ogg|opus|aac|flac|wma)$/i;
@@ -506,50 +508,53 @@ function buildGroupsFromFiles(files) {
 }
 
 async function loadDocuments(hasCache = false) {
+    // 중복 실행 방지 — 로그인 재인증(401)·새로고침 등으로 동기화가 겹치면
+    // 서로 다른 카운터가 상태바를 번갈아 덮어써 '수집 개수가 왔다갔다'한다. 한 번에 하나만.
+    if (state.refreshing) return;
     state.refreshing = true;
+    try {
+        // ① 증분 동기화: 캐시 + 베이스라인 토큰이 있으면, *변경된 파일만* 반영(전체 스캔 회피).
+        //    (🔄 새로고침은 hasCache=false → 항상 강제 전체 스캔)
+        if (hasCache && getChangesToken() && state.allFiles && state.folderMap) {
+            try {
+                const changes = await driveFetchChanges();      // 변경 목록 + 토큰 전진
+                if (!changes.length) {
+                    setStatus(`✅ 변경 없음 — 캐시 사용 (${fmtTimeSince(state.fetchedAt)} 전 동기화)`);
+                    return;
+                }
+                setStatus(`변경 ${changes.length}건 확인 — 반영 중…`);
+                if (await applyDriveChanges(changes)) {          // 파일만 변경 → 증분 반영 성공
+                    setStatus(`✅ 변경 ${changes.length}건 반영 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
+                    return;
+                }
+                setStatus("폴더 구조 변경 감지 — 전체 갱신 중…");   // 폴더 변경 등 → 전체 스캔으로
+            } catch (_) { /* 변경 API 실패(토큰 만료 등) → 전체 스캔 */ }
+        }
 
-    // ① 증분 동기화: 캐시 + 베이스라인 토큰이 있으면, *변경된 파일만* 반영(전체 스캔 회피).
-    //    (🔄 새로고침은 hasCache=false → 항상 강제 전체 스캔)
-    if (hasCache && getChangesToken() && state.allFiles && state.folderMap) {
-        try {
-            const changes = await driveFetchChanges();      // 변경 목록 + 토큰 전진
-            if (!changes.length) {
-                state.refreshing = false;
-                setStatus(`✅ 변경 없음 — 캐시 사용 (${fmtTimeSince(state.fetchedAt)} 전 동기화)`);
-                return;
-            }
-            setStatus(`변경 ${changes.length}건 확인 — 반영 중…`);
-            if (await applyDriveChanges(changes)) {          // 파일만 변경 → 증분 반영 성공
-                state.refreshing = false;
-                setStatus(`✅ 변경 ${changes.length}건 반영 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
-                return;
-            }
-            setStatus("폴더 구조 변경 감지 — 전체 갱신 중…");   // 폴더 변경 등 → 전체 스캔으로
-        } catch (_) { /* 변경 API 실패(토큰 만료 등) → 전체 스캔 */ }
+        // ② 전체 스캔 — 평면 파일목록 + 폴더맵 수집 후 그룹 재구성
+        if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
+        const allFiles = [];
+        const folderMap = {};
+        await listAllFilesUnder(state.rootFolderId,
+            (batch) => { for (const f of batch) allFiles.push(f); if (!hasCache) setStatus(`📥 동기화 중… ${allFiles.length}개 수집됨`); },
+            (folder) => { folderMap[folder.id] = { name: folder.name, parentId: folder.parentId }; }
+        );
+
+        state.allFiles = allFiles;
+        state.folderMap = folderMap;
+        const { grouped, encTree } = buildGroupsFromFiles(allFiles);
+        state.grouped = grouped;
+        state.encyclopediaTree = encTree;
+        state.fetchedAt = Date.now();
+        saveCache();
+        // 전체 스캔 기준으로 변경감지 베이스라인을 '지금'으로 재설정 → 다음부턴 증분만
+        try { setChangesToken(await fetchStartPageToken()); } catch (_) {}
+        renderList();
+        const audioCount = allFiles.filter(f => f.isAudio).length;
+        setStatus(`✅ ${allFiles.length}개 파일 동기화 완료${audioCount ? ` (🔊 음성 ${audioCount})` : ""} (${new Date().toLocaleTimeString('ko-KR')})`);
+    } finally {
+        state.refreshing = false;   // 어떤 경로로 끝나든 항상 해제(예외 시 잠김 방지)
     }
-
-    // ② 전체 스캔 — 평면 파일목록 + 폴더맵 수집 후 그룹 재구성
-    if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
-    const allFiles = [];
-    const folderMap = {};
-    await listAllFilesUnder(state.rootFolderId,
-        (batch) => { for (const f of batch) allFiles.push(f); if (!hasCache) setStatus(`📥 동기화 중… ${allFiles.length}개 수집됨`); },
-        (folder) => { folderMap[folder.id] = { name: folder.name, parentId: folder.parentId }; }
-    );
-
-    state.allFiles = allFiles;
-    state.folderMap = folderMap;
-    const { grouped, encTree } = buildGroupsFromFiles(allFiles);
-    state.grouped = grouped;
-    state.encyclopediaTree = encTree;
-    state.fetchedAt = Date.now();
-    state.refreshing = false;
-    saveCache();
-    // 전체 스캔 기준으로 변경감지 베이스라인을 '지금'으로 재설정 → 다음부턴 증분만
-    try { setChangesToken(await fetchStartPageToken()); } catch (_) {}
-    renderList();
-    const audioCount = allFiles.filter(f => f.isAudio).length;
-    setStatus(`✅ ${allFiles.length}개 파일 동기화 완료${audioCount ? ` (🔊 음성 ${audioCount})` : ""} (${new Date().toLocaleTimeString('ko-KR')})`);
 }
 
 // encyclopedia 트리에 파일 추가 — 폴더 세그먼트 따라 재귀로 들어가며 노드 생성
