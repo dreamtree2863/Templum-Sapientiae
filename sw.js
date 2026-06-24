@@ -10,7 +10,7 @@
 // 버전 정책: 앱(코드) 갱신 때는 SHELL_CACHE 만 bump 한다(셸=index/app.js/style 만 다시 받음).
 //   DOC_CACHE 는 *문서 캐시 형식이 바뀔 때만* 올린다 — 올리면 받아둔 문서 본문이 전부
 //   날아가 재다운로드된다. 그래서 앱 갱신만으로는 절대 올리지 않는다(전체 재로드 방지).
-const SHELL_CACHE = "templum-shell-v14";  // v14: 동기화 중복가드 + 캐시버전 고정 정책
+const SHELL_CACHE = "templum-shell-v15";  // v15: 증분 새로고침(버튼/당겨서) + Drive 500 재시도
 const DOC_CACHE = "templum-docs-v4";      // (문서 캐시 형식 그대로 유지 → 본문 재다운로드 없음)
 
 const SHELL_FILES = [

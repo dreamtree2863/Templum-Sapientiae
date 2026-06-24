@@ -366,19 +366,33 @@ async function applyDriveChanges(entries) {
 async function driveFetch(path, params) {
     const url = new URL("https://www.googleapis.com/drive/v3/" + path);
     if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    const resp = await fetch(url.toString(), {
-        headers: { "Authorization": "Bearer " + state.accessToken },
-        cache: "no-store",   // 브라우저 HTTP 캐시 우회 → 목록을 항상 Drive 최신으로
-    });
-    if (resp.status === 401) {
-        // 토큰 만료 — 저장 토큰 폐기 + silent 재인증 시도
-        clearStoredToken();
-        state.accessToken = null;
-        autoSignInIfPossible();
-        throw new Error("토큰 만료 — 자동 재로그인 시도 중. 잠시 후 새로고침해 주세요.");
+    // Drive 는 일시적으로 500/502/503(서버 내부오류) 이나 429(속도제한) 를 줄 때가 있다.
+    // 지수 백오프로 최대 4회 재시도 → 한 번의 일시 오류로 동기화가 깨지지 않게 한다.
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt) await new Promise(r => setTimeout(r, 400 * (2 ** (attempt - 1)) + Math.random() * 300));
+        let resp;
+        try {
+            resp = await fetch(url.toString(), {
+                headers: { "Authorization": "Bearer " + state.accessToken },
+                cache: "no-store",   // 브라우저 HTTP 캐시 우회 → 항상 Drive 최신
+            });
+        } catch (e) { lastErr = e; continue; }   // 네트워크 일시 오류 → 재시도
+        if (resp.status === 401) {
+            // 토큰 만료 — 저장 토큰 폐기 + silent 재인증 시도 (재시도 안 함)
+            clearStoredToken();
+            state.accessToken = null;
+            autoSignInIfPossible();
+            throw new Error("토큰 만료 — 자동 재로그인 시도 중. 잠시 후 새로고침해 주세요.");
+        }
+        if (resp.status === 429 || resp.status >= 500) {   // 일시적 서버오류·속도제한 → 백오프 재시도
+            lastErr = new Error("Drive API " + resp.status + " " + resp.statusText);
+            continue;
+        }
+        if (!resp.ok) throw new Error("Drive API " + resp.status + " " + resp.statusText);
+        return resp.json();
     }
-    if (!resp.ok) throw new Error("Drive API " + resp.status + " " + resp.statusText);
-    return resp.json();
+    throw lastErr || new Error("Drive API 요청 실패(재시도 초과)");
 }
 
 async function findFolderByName(name, parentId) {
@@ -555,6 +569,35 @@ async function loadDocuments(hasCache = false) {
     } finally {
         state.refreshing = false;   // 어떤 경로로 끝나든 항상 해제(예외 시 잠김 방지)
     }
+}
+
+// 당겨서 새로고침 — 목록 화면 최상단에서 아래로 끌면 *증분* 새로고침.
+//   passive 리스너만 사용(스크롤 방해 X). 설치형(standalone)에서 네이티브 PTR 이
+//   비활성이어도 동작하도록 직접 구현.
+function setupPullToRefresh() {
+    let startY = 0, tracking = false, armed = false;
+    const TH = 70;
+    const onList = () => { const s = $('screen-list'); return s && !s.classList.contains('hidden'); };
+    const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+    window.addEventListener('touchstart', (e) => {
+        if (!onList() || !atTop() || e.touches.length !== 1) { tracking = false; return; }
+        startY = e.touches[0].clientY; tracking = true; armed = false;
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+        if (!tracking) return;
+        const dy = e.touches[0].clientY - startY;
+        if (dy > TH && atTop()) {
+            if (!armed) { armed = true; setStatus("↓ 놓으면 새로고침"); }
+        } else if (dy <= 0) {
+            tracking = false; armed = false;
+        }
+    }, { passive: true });
+    window.addEventListener('touchend', () => {
+        if (tracking && armed && state.accessToken && !state.refreshing) {
+            loadDocuments(!!state.allFiles);   // 증분(없으면 전체)
+        }
+        tracking = false; armed = false;
+    }, { passive: true });
 }
 
 // encyclopedia 트리에 파일 추가 — 폴더 세그먼트 따라 재귀로 들어가며 노드 생성
@@ -1761,10 +1804,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     $('btn-refresh').addEventListener('click', () => {
-        if (state.accessToken) loadDocuments();
+        // 증분 새로고침 — 변경분만 반영(데이터 있으면). 없으면 자동 전체 스캔.
+        if (state.accessToken) loadDocuments(!!state.allFiles);
         else requestSignIn();
     });
     $('btn-install').addEventListener('click', tryInstall);
+    setupPullToRefresh();   // 당겨서 새로고침(증분)
 
     // ── 문서 AI ──
     $('btn-ai')?.addEventListener('click', openAI);
