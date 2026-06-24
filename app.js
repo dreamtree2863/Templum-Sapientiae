@@ -252,6 +252,46 @@ function fmtTimeSince(ts) {
     return `${Math.floor(hr / 24)}일`;
 }
 
+// ─── 변경 감지 (Drive Changes API) ──────────────────────────────────
+//   매 실행마다 전체 폴더를 재귀 스캔하면 느리고, 드라이브가 안 바뀌어도
+//   "첫 로드"처럼 돈다. startPageToken 을 저장해 두고, 다음 실행에서
+//   changes.list 로 *변경이 있었는지만* 1~2번의 호출로 확인 → 변경 없으면
+//   캐시를 그대로 쓰고 스캔을 통째로 건너뛴다(즉시).
+const CHANGES_TOKEN_KEY = "templum.changesToken.v1";
+function getChangesToken() { try { return localStorage.getItem(CHANGES_TOKEN_KEY) || ""; } catch (_) { return ""; } }
+function setChangesToken(t) { try { if (t) localStorage.setItem(CHANGES_TOKEN_KEY, t); } catch (_) {} }
+
+async function fetchStartPageToken() {
+    const r = await driveFetch("changes/startPageToken");
+    return r.startPageToken || "";
+}
+
+// 저장 토큰 이후 변경이 있었는지 확인하고 토큰을 전진시킨다. 반환 true = 변경 있음(재스캔 필요).
+async function driveHasChanges() {
+    let token = getChangesToken();
+    if (!token) return true;                       // 베이스라인 없음 → 전체 스캔
+    let changed = false, guard = 0;
+    try {
+        while (token && guard++ < 50) {
+            const r = await driveFetch("changes", {
+                pageToken: token,
+                pageSize: 200,
+                restrictToMyDrive: "true",
+                fields: "newStartPageToken,nextPageToken,changes(fileId,removed)",
+            });
+            if ((r.changes || []).length) changed = true;
+            if (r.nextPageToken) { token = r.nextPageToken; continue; }
+            if (r.newStartPageToken) setChangesToken(r.newStartPageToken);  // 베이스라인 전진
+            break;
+        }
+    } catch (_) {
+        // 토큰 만료(404) 등 → 베이스라인 폐기하고 전체 스캔(이후 새 토큰 재확보)
+        try { localStorage.removeItem(CHANGES_TOKEN_KEY); } catch (__) {}
+        return true;
+    }
+    return changed;
+}
+
 // ─── Drive API ───────────────────────────────────────────────────────
 async function driveFetch(path, params) {
     const url = new URL("https://www.googleapis.com/drive/v3/" + path);
@@ -352,6 +392,20 @@ function classify(file) {
 
 async function loadDocuments(hasCache = false) {
     state.refreshing = true;
+
+    // 변경 감지: 캐시 + 베이스라인 토큰이 있으면, 변경 없을 때 전체 스캔을 건너뛴다(즉시).
+    //   (🔄 새로고침은 hasCache=false 로 호출되어 항상 강제 전체 스캔)
+    if (hasCache && getChangesToken()) {
+        try {
+            if (!(await driveHasChanges())) {
+                state.refreshing = false;
+                setStatus(`✅ 변경 없음 — 캐시 사용 (${fmtTimeSince(state.fetchedAt)} 전 동기화)`);
+                return;
+            }
+            setStatus("변경 감지 — 목록 갱신 중…");
+        } catch (_) { /* 변경 API 실패 → 평소대로 전체 스캔 */ }
+    }
+
     if (!hasCache) setStatus("문서 목록 로드 중… (첫 동기화는 오래 걸릴 수 있습니다)");
 
     // 점진적 수집 — 폴더 받을 때마다 그룹화 + 부분 렌더
@@ -431,6 +485,8 @@ async function loadDocuments(hasCache = false) {
     state.fetchedAt = Date.now();
     state.refreshing = false;
     saveCache();
+    // 전체 스캔 직후 변경감지 베이스라인 확보(없을 때만) → 다음 실행부터 변경 없으면 스캔 생략
+    try { if (!getChangesToken()) setChangesToken(await fetchStartPageToken()); } catch (_) {}
     renderList();
     const audioCount = Object.keys(audioByKey).length;
     setStatus(`✅ ${totalSoFar}개 파일 동기화 완료${audioCount ? ` (🔊 음성 ${audioCount})` : ""} (${new Date().toLocaleTimeString('ko-KR')})`);
