@@ -1,13 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────
-// Service Worker — 온디맨드 캐시
-//   · PWA 셸 (index.html, app.js, style.css, manifest) 은 *항상 캐시*
-//   · Drive API 의 파일 다운로드 응답은 *열어본 것만 캐시* (on-demand)
-//   · 캐시 적중 시 즉시 반환 (오프라인 OK), 없으면 네트워크 → 캐시
+// Service Worker — 온디맨드 캐시 + Drive 인증 프록시
+//   · PWA 셸 (index.html, app.js, style.css, manifest) 은 network-first
+//   · Drive 문서(HTML) alt=media 는 network-first(no-store) → 열어본 것만 캐시(오프라인용)
+//   · Drive 음성(mp3 등) 은 <audio> 가 직접 스트리밍 — SW 가 Authorization 헤더를
+//     주입하고 Range 요청을 그대로 전달(206) → 통째 다운로드 없이 즉시 재생/탐색
+//   · 모든 Drive fetch 는 cache:'no-store' → 브라우저 HTTP 캐시가 옛 내용을 주지 못함
 // ─────────────────────────────────────────────────────────────────────
 
-// 버전 — 셸 파일 갱신 시 bump (예: -v2, -v3 …)
-const SHELL_CACHE = "templum-shell-v9";  // v9: 일반 낭독을 데스크톱 tts_common 규칙대로 정규화 — 셸 갱신
-const DOC_CACHE = "templum-docs-v3";     // v3: 문서 캐시 초기화 — 수정/신규 문서 즉시 픽업
+// 버전 — 셸/문서 캐시 갱신 시 bump. v10/v4: no-store·오디오 스트리밍·즉시 최신화
+const SHELL_CACHE = "templum-shell-v10";
+const DOC_CACHE = "templum-docs-v4";
 
 const SHELL_FILES = [
     "./",
@@ -17,11 +19,14 @@ const SHELL_FILES = [
     "./manifest.webmanifest",
 ];
 
+// 페이지가 보내준 Drive 액세스 토큰(메모리에만 보관). <audio> 직접요청에 헤더 주입용.
+let swToken = null;
+
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(SHELL_CACHE).then(cache => cache.addAll(SHELL_FILES)).catch(() => {})
     );
-    // skipWaiting 은 페이지가 명시적으로 메시지 보낼 때만 — 사용자가 토스트 누르기 전까진 옛 버전 유지
+    // skipWaiting 은 페이지가 토스트로 명시 요청할 때만
 });
 
 self.addEventListener('activate', event => {
@@ -33,26 +38,49 @@ self.addEventListener('activate', event => {
     self.clients.claim();
 });
 
-// 페이지에서 'skipWaiting' 메시지 받으면 즉시 활성화 — 토스트 클릭 시 호출됨
 self.addEventListener('message', event => {
-    if (event.data === 'skipWaiting') {
-        self.skipWaiting();
-    }
+    const d = event.data;
+    if (d === 'skipWaiting') { self.skipWaiting(); return; }
+    if (d && d.type === 'token' && d.token) { swToken = d.token; }
 });
+
+// 인증 헤더가 없으면(예: <audio> 의 직접요청) 보관 토큰으로 채워 새 Request 생성.
+// Range 등 원래 헤더는 그대로 복사 → 스트리밍/탐색 유지.
+function withAuth(req) {
+    if (req.headers.has('Authorization') || !swToken) return req;
+    const h = new Headers(req.headers);
+    h.set('Authorization', 'Bearer ' + swToken);
+    return new Request(req.url, {
+        method: req.method,
+        headers: h,
+        mode: 'cors',
+        credentials: 'omit',
+        redirect: 'follow',
+    });
+}
 
 self.addEventListener('fetch', event => {
     const req = event.request;
     const url = new URL(req.url);
 
-    // Drive 파일 다운로드 — alt=media 가 붙은 GET. 토큰은 헤더에 있어 cache key 가 안전.
-    if (url.hostname === "www.googleapis.com" && url.pathname.startsWith("/drive/v3/files/")
+    // Drive 파일 다운로드 — alt=media GET
+    if (url.hostname === "www.googleapis.com"
+        && url.pathname.startsWith("/drive/v3/files/")
         && url.searchParams.get("alt") === "media") {
+        // 음성(미디어) — <audio> 스트리밍: 캐시하지 않고 Range 그대로 전달, 인증 주입
+        if (req.destination === "audio" || req.destination === "video" || req.headers.has("range")) {
+            event.respondWith(
+                fetch(withAuth(req), { cache: 'no-store' })
+                    .catch(() => new Response("", { status: 504 }))
+            );
+            return;
+        }
+        // 문서(HTML) — network-first(no-store) + 열어본 것 캐시
         event.respondWith(handleDocFetch(req));
         return;
     }
 
-    // PWA 셸 — *network-first* 로 변경: 항상 최신 시도, 실패 시 캐시.
-    // 이렇게 해야 새 버전 푸시가 다음 접속 시 즉시 반영됨.
+    // PWA 셸 — network-first
     if (req.method === "GET" && url.origin === self.location.origin) {
         event.respondWith(
             fetch(req).then(resp => {
@@ -65,16 +93,15 @@ self.addEventListener('fetch', event => {
         );
         return;
     }
-    // 그 외 (Drive listing API, OAuth 등) — 항상 네트워크
+    // 그 외(Drive listing API, OAuth 등) — 항상 네트워크
 });
 
 async function handleDocFetch(req) {
-    // 캐시 키는 URL 의 *경로 + alt=media* 만 사용 (토큰은 헤더에 있어 URL 에 없음)
     const cache = await caches.open(DOC_CACHE);
-    // 네트워크 우선 시도 — 새 버전 픽업. 실패하면 캐시 반환 (오프라인).
     try {
-        const resp = await fetch(req);
-        if (resp.ok) {
+        // no-store: 브라우저 HTTP 캐시 우회 → 항상 Drive 의 최신 내용
+        const resp = await fetch(withAuth(req), { cache: 'no-store' });
+        if (resp.ok && resp.status === 200) {
             cache.put(req, resp.clone()).catch(() => {});
         }
         return resp;

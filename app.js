@@ -15,7 +15,7 @@ const DRIVE_ROOT_NAME = "Templum";  // My Drive 안의 동기화 폴더 이름
 const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 // 캐시 키 (schema 변경 시 v2, v3 ... 으로 bump)
-const CACHE_KEY = "templum.docList.v7";  // v7: 낭독 오디오 연결 강제 재조회 — 오디오 없던 시절 굳은 목록 캐시 무효화
+const CACHE_KEY = "templum.docList.v8";  // v8: no-store 동기화 + 오디오 스트리밍 — 옛 목록 캐시 무효화
 
 // 낭독 오디오 확장자 (데스크톱 tts_common.AUDIO_EXTS 와 동일)
 const AUDIO_RE = /\.(mp3|m4a|wav|ogg|opus|aac|flac|wma)$/i;
@@ -83,6 +83,17 @@ function show(screenId) {
     if (aiBtn) aiBtn.style.display = (screenId === 'screen-list') ? '' : 'none';
 }
 function setStatus(msg) { $('status-bar').textContent = msg || ""; }
+
+// 서비스워커에 Drive 토큰 전달 — SW 가 <audio> 직접요청에 Authorization 을 주입해
+// 통째 다운로드 없이 스트리밍 재생할 수 있게 한다. (토큰은 SW 메모리에만)
+function postTokenToSW() {
+    try {
+        const sw = navigator.serviceWorker;
+        if (sw && sw.controller && state.accessToken) {
+            sw.controller.postMessage({ type: 'token', token: state.accessToken });
+        }
+    } catch (_) {}
+}
 
 // ─── OAuth + 토큰 영속화 ────────────────────────────────────────────
 function storeToken(token, expiresInSeconds) {
@@ -172,6 +183,7 @@ function signOut() {
 
 async function onSignedIn() {
     show('screen-list');
+    postTokenToSW();   // 오디오 스트리밍용 토큰을 SW 에 미리 전달
 
     // 1) 캐시가 있으면 *즉시* 표시 (UX 우선)
     const cached = loadCache();
@@ -246,6 +258,7 @@ async function driveFetch(path, params) {
     if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     const resp = await fetch(url.toString(), {
         headers: { "Authorization": "Bearer " + state.accessToken },
+        cache: "no-store",   // 브라우저 HTTP 캐시 우회 → 목록을 항상 Drive 최신으로
     });
     if (resp.status === 401) {
         // 토큰 만료 — 저장 토큰 폐기 + silent 재인증 시도
@@ -811,28 +824,55 @@ function setupAudioBar(file) {
     if (!bar.childElementCount) bar.style.display = "none";
 }
 
-// 저장된 mp3 를 Drive 에서 blob 으로 받아 <audio> 로 재생 (인증 헤더 필요 → 직접 src 불가)
+// 저장된 mp3 재생.
+//   1순위) 서비스워커가 Authorization 헤더를 주입하므로 <audio src> 를 Drive URL 로 직접 지정 →
+//          통째로 받지 않고 Range 스트리밍으로 *즉시* 재생/탐색 (대용량 낭독도 빠름).
+//   2순위) SW 가 없거나 스트리밍 실패 시 → 기존 방식대로 blob 통째 다운로드 폴백.
 async function playSavedAudio(audio, bar, loadBtn) {
     stopDocPlayback();
-    loadBtn.disabled = true;
-    loadBtn.textContent = "⏳ 음성 불러오는 중…";
-    try {
-        const url = `https://www.googleapis.com/drive/v3/files/${audio.id}?alt=media`;
-        const resp = await fetch(url, { headers: { "Authorization": "Bearer " + state.accessToken } });
-        if (!resp.ok) throw new Error("음성 다운로드 " + resp.status);
-        const blob = await resp.blob();
-        _docBlobUrl = URL.createObjectURL(blob);
-        const el = document.createElement('audio');
-        el.controls = true;
-        el.autoplay = true;
-        el.className = "doc-audio";
-        el.src = _docBlobUrl;
-        _docAudioEl = el;
-        loadBtn.replaceWith(el);
+    postTokenToSW();   // SW 가 헤더 주입에 쓸 최신 토큰 확보
+    const url = `https://www.googleapis.com/drive/v3/files/${audio.id}?alt=media`;
+
+    const el = document.createElement('audio');
+    el.controls = true;
+    el.autoplay = true;
+    el.preload = "auto";
+    el.className = "doc-audio";
+    _docAudioEl = el;
+    loadBtn.replaceWith(el);
+
+    let triedBlob = false;
+    async function blobFallback() {
+        if (triedBlob) return;
+        triedBlob = true;
+        try {
+            const resp = await fetch(url, {
+                headers: { "Authorization": "Bearer " + state.accessToken },
+                cache: "no-store",
+            });
+            if (!resp.ok) throw new Error("음성 다운로드 " + resp.status);
+            const blob = await resp.blob();
+            _docBlobUrl = URL.createObjectURL(blob);
+            el.src = _docBlobUrl;
+            el.play().catch(() => {});
+        } catch (e) {
+            const retry = document.createElement('button');
+            retry.className = "audio-btn";
+            retry.textContent = "⚠️ 재생 실패 — 다시 시도";
+            retry.addEventListener('click', () => playSavedAudio(audio, bar, retry));
+            (_docAudioEl || el).replaceWith(retry);
+            _docAudioEl = null;
+        }
+    }
+
+    const canStream = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    if (canStream) {
+        // 스트리밍 실패(예: SW 가 토큰 못 받음) 시 1회 blob 폴백
+        el.addEventListener('error', blobFallback, { once: true });
+        el.src = url;
         el.play().catch(() => {});
-    } catch (e) {
-        loadBtn.disabled = false;
-        loadBtn.textContent = "⚠️ 재생 실패 — 다시 시도";
+    } else {
+        await blobFallback();
     }
 }
 
@@ -1078,14 +1118,32 @@ function toggleSpeak(btn) {
     speakNext();
 }
 
+// 문서 본문 캐시 — mtime 재검증으로 *빠름 + 최신* 동시 달성:
+//   · 목록의 modifiedTime(file.mtime) 이 캐시 당시와 같으면 → 캐시 즉시 반환(네트워크 0)
+//   · 다르거나(=PC에서 수정/신규) 캐시가 없으면 → no-store 로 재다운로드 후 캐시·mtime 갱신
+const DOC_CACHE_NAME = "templum-docs-v4";   // ⚠ sw.js 의 DOC_CACHE 와 동일해야 함
+const DOC_MTIME_KEY = "templum.docMtime.v1";
+function getDocMtimes() { try { return JSON.parse(localStorage.getItem(DOC_MTIME_KEY) || "{}"); } catch (_) { return {}; } }
+function setDocMtime(id, m) { try { const o = getDocMtimes(); o[id] = m; localStorage.setItem(DOC_MTIME_KEY, JSON.stringify(o)); } catch (_) {} }
+
 async function fetchFileContent(file) {
-    // 서비스워커가 이미 캐시했으면 그쪽이 응답. 아니면 Drive API.
     const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+    // 1) 변경되지 않은 문서 → 캐시에서 즉시 (빠름)
+    if (file.mtime && getDocMtimes()[file.id] === file.mtime) {
+        try {
+            const hit = await (await caches.open(DOC_CACHE_NAME)).match(url);
+            if (hit) return await hit.text();
+        } catch (_) { /* 캐시 사용 불가 → 네트워크로 진행 */ }
+    }
+    // 2) 신규·수정·미캐시 → 최신 본문 다운로드(no-store) 후 캐시·mtime 기록
     const resp = await fetch(url, {
         headers: { "Authorization": "Bearer " + state.accessToken },
+        cache: "no-store",
     });
     if (!resp.ok) throw new Error("Drive 다운로드 " + resp.status);
-    return resp.text();
+    try { await (await caches.open(DOC_CACHE_NAME)).put(url, resp.clone()); } catch (_) {}
+    if (file.mtime) setDocMtime(file.id, file.mtime);
+    return await resp.text();
 }
 
 function escapeHtml(s) {
