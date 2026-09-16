@@ -12,9 +12,24 @@
 export const AUDIO_RE = /\.(mp3|m4a|wav|ogg|opus|aac|wma)$/i;
 export const DOC_RE = /\.html?$/i;
 
-/** 미러에서 우리가 담을 파일인가 — listAllFilesUnder 의 keep 으로 넘긴다. */
-export function keepFile(name) {
-  return DOC_RE.test(name) || AUDIO_RE.test(name);
+export const STATE_RE = /\.json$/i;
+
+/** 미러에서 우리가 담을 파일인가 — listAllFilesUnder 의 keep 으로 넘긴다.
+ *
+ *  ‼ `_state/` 아래 .json 도 담아야 한다. 복습 카드·객관식 문제은행이 거기 있는데,
+ *    확장자로만 거르면 카탈로그에 안 들어와 **폰이 영영 찾지 못한다**.
+ *    반대로 아무 .json 이나 담으면 목록이 지저분해지므로 `_state` 아래만 받는다.
+ */
+export function keepFile(name, pathSegs) {
+  if (DOC_RE.test(name) || AUDIO_RE.test(name)) return true;
+  const first = Array.isArray(pathSegs) ? pathSegs[0] : String(pathSegs || '').split('/')[0];
+  return first === '_state' && STATE_RE.test(name);
+}
+
+/** 앱이 쓰는 내부 폴더(_state·_inbox) — 문서 목록에는 보이지 않아야 한다. */
+export function isSystemPath(path) {
+  const first = String(path || '').split('/')[0];
+  return first.startsWith('_');
 }
 export function isAudio(name) { return AUDIO_RE.test(name); }
 

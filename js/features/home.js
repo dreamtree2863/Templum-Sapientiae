@@ -144,7 +144,7 @@ export async function renderHub(name) {
 function countByKind() {
   const out = {};
   for (const f of catalog.files()) {
-    if (classify.isAudio(f.name)) continue;
+    if (classify.isAudio(f.name) || classify.isSystemPath(f.path)) continue;
     const k = classify.classify(f).kind;
     out[k] = (out[k] || 0) + 1;
   }

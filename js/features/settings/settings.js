@@ -120,7 +120,7 @@ async function syncFacts() {
   const a = get('auth');
   const counts = {};
   for (const f of catalog.files()) {
-    if (classify.isAudio(f.name)) continue;
+    if (classify.isAudio(f.name) || classify.isSystemPath(f.path)) continue;
     const k = classify.classify(f).kind;
     counts[k] = (counts[k] || 0) + 1;
   }

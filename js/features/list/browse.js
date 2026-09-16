@@ -69,6 +69,8 @@ function levelAt(prefix) {
   for (const f of catalog.files()) {
     if (classify.isAudio(f.name)) continue;
     const p = f.path || '';
+    // 앱이 쓰는 내부 폴더(_state·_inbox)는 자료가 아니다 — 목록에 띄우지 않는다
+    if (classify.isSystemPath(p)) continue;
     if (p !== prefix && !p.startsWith(head)) continue;
     const rest = p === prefix ? '' : p.slice(head.length);
     if (!rest) { files.push(f); continue; }
@@ -195,6 +197,7 @@ function searchHtml() {
   for (const f of catalog.files()) {
     if (classify.isAudio(f.name)) continue;
     const p = f.path || '';
+    if (classify.isSystemPath(p)) continue;
     if (p !== state.path && !p.startsWith(head)) continue;
     if (!(f.name + ' ' + p).normalize('NFC').toLowerCase().includes(text)) continue;
     hits.push(f);

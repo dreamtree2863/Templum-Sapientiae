@@ -85,7 +85,7 @@ async function listOneFolder(id, path, keep) {
     for (const f of (res.files || [])) {
       if (f.mimeType === 'application/vnd.google-apps.folder') {
         folders.push({ id: f.id, name: f.name, parentId: id, path: [...path, f.name] });
-      } else if (!keep || keep(f.name)) {
+      } else if (!keep || keep(f.name, path)) {
         files.push({
           id: f.id,
           name: f.name,

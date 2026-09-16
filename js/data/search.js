@@ -69,7 +69,8 @@ function bigrams(s) {
 export function rank(query, { limit = 12, root = '' } = {}) {
   const tokens = tokenize(query);
   const pool = catalog.files().filter(f =>
-    !classify.isAudio(f.name) && (!root || (f.path || '').startsWith(root)));
+    !classify.isAudio(f.name) && !classify.isSystemPath(f.path)
+    && (!root || (f.path || '').startsWith(root)));
 
   const scored = pool.map(f => {
     const info = classify.classify(f);

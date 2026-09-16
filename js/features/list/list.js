@@ -63,6 +63,7 @@ function filtered() {
   const out = [];
   for (const f of catalog.files()) {
     if (classify.isAudio(f.name)) continue;
+    if (classify.isSystemPath(f.path)) continue;   // _state·_inbox 는 자료가 아니다
     const seg = classify.segments(f);
     if (q.root && seg.root !== q.root) continue;
     if (q.kind === 'news') {
