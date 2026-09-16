@@ -8,7 +8,7 @@
 import * as shell from '../shell.js';
 import * as router from '../../core/router.js';
 import { get } from '../../core/store.js';
-import { catalog, classify, log, outbox, refresh, storageInfo } from '../../data/index.js';
+import { auth, catalog, classify, log, outbox, uplink, refresh, storageInfo } from '../../data/index.js';
 import { applyThemeAll, applyScaleAll } from '../viewer/viewer.js';
 
 const esc = shell.escapeHtml;
@@ -22,13 +22,18 @@ export async function renderSync() {
     <div class="set-actions">
       <button class="more-btn pressable" data-act="refresh">목록 새로고침</button>
       <button class="more-btn pressable" data-act="rescan">전체 다시 훑기</button>
+      <button class="more-btn pressable" data-act="send">지금 PC 로 보내기</button>
+      <button class="more-btn pressable" data-act="probe">폰 → PC 연결 시험</button>
     </div>
+    <div id="probe"></div>
     <p class="set-note">“전체 다시 훑기”는 Drive 를 처음부터 다시 셉니다.
       목록이 오래돼 보이거나 새로 만든 자료가 안 보일 때 씁니다(9천여 개라 조금 걸립니다).</p>`;
 
   el.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
+    if (b.dataset.act === 'send') { await onSend(el, b); return; }
+    if (b.dataset.act === 'probe') { await onProbe(el, b); return; }
     const force = b.dataset.act === 'rescan';
     b.disabled = true;
     b.textContent = force ? '훑는 중…' : '받는 중…';
@@ -45,6 +50,54 @@ export async function renderSync() {
   });
 
   shell.render({ title: '동기화 상태', back: true, node: el });
+}
+
+/* 지금 보내기 — 권한이 없으면 동의 화면부터 띄운다(처음 한 번). */
+async function onSend(el, b) {
+  b.disabled = true; b.textContent = '보내는 중…';
+  try {
+    const r = await uplink.flush({ silent: false });
+    if (r.skipped === 'no-write-scope') {
+      shell.toast('먼저 쓰기 권한에 동의해 주세요');
+      auth.ensureWriteScope();
+    } else if (r.skipped) {
+      shell.toast({ offline: '오프라인입니다', 'signed-out': '로그인이 필요합니다',
+                    busy: '보내는 중입니다' }[r.skipped] || r.skipped);
+    } else {
+      shell.toast(r.sent ? `${r.sent}건 보냈습니다` : '보낼 것이 없습니다', 'ok');
+    }
+  } catch (e) {
+    shell.toast(e.message || '보내지 못했습니다', 'error');
+  }
+  b.disabled = false; b.textContent = '지금 PC 로 보내기';
+  el.querySelector('#body').innerHTML = rowsHtml(await syncFacts());
+  el.querySelector('#queue').innerHTML = queueHtml(await outbox.pending());
+}
+
+/* 연결 시험 — 어디까지 되고 어디서 막히는지 단계별로 보여 준다.
+   ‼ `drive.file` 권한으로 Templum 안에 `_inbox` 를 만들 수 있는지가 핵심이다. */
+async function onProbe(el, b) {
+  b.disabled = true; b.textContent = '시험 중…';
+  let r;
+  try { r = await uplink.probe(); }
+  catch (e) { r = { ok: false, steps: [{ name: '시험', ok: false, detail: e.message }] }; }
+  b.disabled = false; b.textContent = '폰 → PC 연결 시험';
+
+  if (r.needScope) {
+    el.querySelector('#probe').innerHTML =
+      `<p class="set-note">PC 로 보내려면 Drive 쓰기 권한이 필요합니다.
+        아래를 누르면 구글 동의 화면이 뜹니다(처음 한 번).</p>`;
+    auth.ensureWriteScope();
+    return;
+  }
+  el.querySelector('#probe').innerHTML = `
+    <h3 class="set-sub">연결 시험 ${r.ok ? '— 통과' : '— 막힘'}</h3>
+    <div class="rows">${r.steps.map(s2 => `<div class="set-row">
+      <span class="k">${s2.ok ? '✓' : '✗'} ${esc(s2.name)}</span>
+      <span class="v ${s2.ok ? 'good' : 'warn'}">${esc(s2.detail || (s2.ok ? '됨' : '안 됨'))}</span>
+    </div>`).join('')}</div>
+    ${r.scopeTooNarrow ? `<p class="set-note">‼ 좁은 권한(drive.file)으로는 Templum 안에
+      폴더를 만들지 못합니다. 더 넓은 권한이 필요하다는 뜻이니 알려 주세요.</p>` : ''}`;
 }
 
 async function syncFacts() {

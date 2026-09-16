@@ -75,6 +75,19 @@ function registerSW() {
   navigator.serviceWorker.addEventListener('controllerchange', () => data.auth.postTokenToSW());
 }
 
+/* ── 폰 → PC 보내기 ───────────────────────────────────────────────────
+ *  폰은 언제든 앱이 죽고 지하철에서는 끊긴다. 그래서 기회가 생길 때마다 보낸다 —
+ *  한 곳에만 걸어 두면 반드시 놓친다. (보내는 일 자체는 data/uplink.js)
+ */
+function wireUplink() {
+  const go = () => { data.uplink.flush().catch(() => {}); };
+  window.addEventListener('online', go);
+  document.addEventListener('visibilitychange', go);   // 앱을 떠날 때·돌아올 때
+  window.addEventListener('hashchange', go);           // 화면을 옮길 때
+  setInterval(go, 30 * 60 * 1000);                     // 오래 켜 두는 경우
+  go();
+}
+
 /* ── 기동 ─────────────────────────────────────────────────────────── */
 async function boot() {
   const kvTheme = localStorage.getItem('templum.' + THEME_KEY);
@@ -104,6 +117,7 @@ async function boot() {
     shell.toast('기동 중 문제가 생겼습니다.', 'error');
     return;
   }
+  wireUplink();
   log.info('boot', `캐시 ${res.cached}개 · 로그인 ${res.signedIn ? 'O' : 'X'}${res.offline ? ' · 오프라인' : ''}`);
 
   const $refresh = document.getElementById('btn-refresh');
