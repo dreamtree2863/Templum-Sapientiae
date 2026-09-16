@@ -15,7 +15,14 @@ import { emit, EVENTS } from '../core/bus.js';
 import { keepFile, isAudio, audioStem, docStem, classify, segments } from './classify.js';
 
 const ROOT_NAME = 'Templum';
-const CHANGES_TOKEN = 'changesToken.v1';
+/* ‼ 커서 키를 v2 로 올린 이유 — 실제로 물린 함정이다.
+ *   옛 app.js 는 같은 이름(templum.changesToken.v1)을 썼는데, 목록 저장은
+ *   localStorage 5MB 한도에 걸려 조용히 실패하면서 커서만 앞으로 감겼다.
+ *   그 상태를 물려받으면 목록은 6월 것인데 Drive 는 "변경 없음"만 답한다
+ *   — 새로고침을 아무리 눌러도 그 뒤 만들어진 학습지 736편이 영영 안 보인다.
+ *   키를 갈아 옛 커서를 한 번 버리고 전체 스캔으로 되돌린다. */
+const CHANGES_TOKEN = 'changesToken.v2';
+const DEAD_TOKEN = 'changesToken.v1';          // 옛 앱이 남긴 커서 — 믿지 않는다
 const OLD_LS_CACHE = 'templum.docList.v9';     // 옛 localStorage 캐시 — 1회 이전 후 삭제
 
 let rootId = null;
@@ -37,6 +44,8 @@ async function save() {
 }
 
 export async function load() {
+  try { kv.del(DEAD_TOKEN); } catch (e) { /* 무시 */ }
+
   // 옛 localStorage 캐시가 남아 있으면 한 번만 옮겨 담고 비운다
   try {
     const legacy = localStorage.getItem(OLD_LS_CACHE);

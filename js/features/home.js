@@ -27,16 +27,18 @@ export async function renderHome() {
       <h1 class="home-title">Templum</h1>
       <p class="home-sub">지혜를 향한 여정의 동반자</p>
     </div>
-    <div class="widgets">
-      <div class="widget"><span class="n" id="w-docs">${c.total || '—'}</span><span class="k">자료</span></div>
-      <div class="widget"><span class="n" id="w-review">${rev.due || 0}</span><span class="k">오늘 복습</span></div>
-      <div class="widget"><span class="n" id="w-outbox">${ob.pending || 0}</span><span class="k">보낼 기록</span></div>
-    </div>
-    <div class="home-tiles">
-      ${tile('📚', '자료', '백과·아카이브 열람', '#/lib')}
-      ${tile('✍️', '학습지', '백지인출 · 복기퀴즈', '#/work')}
-      ${tile('🧠', '복습', '오늘의 복습 · 객관식', '#/review')}
-      ${tile('⚙️', '설정', '동기화 · 저장공간', '#/settings')}
+    <div class="home-body">
+      <div class="widgets">
+        <div class="widget"><span class="n" id="w-docs">${c.total || '—'}</span><span class="k">자료</span></div>
+        <div class="widget"><span class="n" id="w-review">${rev.due || 0}</span><span class="k">오늘 복습</span></div>
+        <div class="widget"><span class="n" id="w-outbox">${ob.pending || 0}</span><span class="k">보낼 기록</span></div>
+      </div>
+      <div class="home-tiles">
+        ${tile('📚', '자료', '백과·아카이브 열람', '#/lib')}
+        ${tile('✍️', '학습지', '백지인출 · 복기퀴즈', '#/work')}
+        ${tile('🧠', '복습', '오늘의 복습 · 객관식', '#/review')}
+        ${tile('⚙️', '설정', '동기화 · 저장공간', '#/settings')}
+      </div>
     </div>`;
 
   el.addEventListener('click', onTileClick);
@@ -63,8 +65,9 @@ const HUBS = {
     title: '📚 자료',
     desc: '백과사전과 아카이브 문서를 찾아 읽습니다.',
     tiles: [
-      { ico: '📖', label: '백과사전', sub: '이론 문서', go: '#/lib/docs?root=encyclopedia' },
-      { ico: '🗃️', label: '아카이브', sub: '문제·요약·쟁점', go: '#/lib/docs?root=archive' },
+      // 분야 → 과목 → 단원으로 한 단씩 내려간다(browse). 이름을 알 때는 🔍 로.
+      { ico: '📖', label: '백과사전', sub: '분야 → 과목 → 단원', go: '#/browse?root=encyclopedia' },
+      { ico: '🗃️', label: '아카이브', sub: '종류 → 과목 → 세트', go: '#/browse?root=archive' },
       { ico: '🕘', label: '최근 본 문서', sub: '', go: '#/lib/recent' },
       { ico: '📰', label: '뉴스 요약', sub: '시사', go: '#/lib/docs?kind=news' },
       { ico: '🔍', label: '검색', sub: '제목·경로', go: '#/lib/docs?focus=search' },
@@ -75,8 +78,8 @@ const HUBS = {
     title: '✍️ 학습지',
     desc: '빈칸을 채우고 채점합니다. 답은 이 기기에 저장됩니다.',
     tiles: [
-      { ico: '📝', label: '백지 인출', sub: '', go: '#/lib/docs?kind=recall', count: 'recall' },
-      { ico: '🔁', label: '복기 퀴즈', sub: '', go: '#/lib/docs?kind=quiz', count: 'quiz' },
+      { ico: '📝', label: '백지 인출', sub: '과목 → 단원', go: '#/browse?root=recall', count: 'recall' },
+      { ico: '🔁', label: '복기 퀴즈', sub: '과목 → 세트', go: '#/browse?root=quiz', count: 'quiz' },
       { ico: '▶️', label: '이어서 풀기', sub: '풀다 만 것', go: '#/work/resume' },
       { ico: '📄', label: '내 답안', sub: '4단계', go: '', off: true },
     ],
@@ -119,8 +122,10 @@ export async function renderHub(name) {
     <div class="tiles">
       ${hub.tiles.map(t => {
         const n = t.count ? counts[t.count] : 0;
-        const sub = t.count ? (n ? `${n}편` : '아직 없음') : t.sub;
-        const off = t.off || (t.count && !n);
+        const sub = t.count ? (n ? `${n}편` : '목록 받는 중') : t.sub;
+        // ‼ 0편이라고 잠그지 않는다. 목록을 아직 못 받았을 때 잠가 버리면
+        //   사용자가 들어가서 "왜 비었는지"를 볼 길조차 막힌다(실제로 겪은 일).
+        const off = t.off;
         return `<button class="tile pressable" data-go="${t.go}"${off ? ' disabled' : ''}>
           <span class="ico">${t.ico}</span>
           <span class="body">
