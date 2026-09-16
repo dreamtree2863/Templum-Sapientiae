@@ -88,8 +88,8 @@ const HUBS = {
     title: '🧠 복습',
     desc: '짧은 시간에 되짚습니다.',
     tiles: [
-      { ico: '🗓️', label: '오늘의 복습', sub: '5단계', go: '', off: true },
-      { ico: '🃏', label: '복습 카드', sub: '5단계', go: '', off: true },
+      { ico: '🗓️', label: '오늘의 복습', sub: '', go: '#/review/today', count: 'due', unit: '장', zero: '오늘은 없음' },
+      { ico: '🃏', label: '복습 카드', sub: '가진 카드', go: '#/review/today', count: 'cards', unit: '장', zero: '아직 없음' },
       { ico: '🔘', label: '객관식 시험', sub: '6단계', go: '', off: true },
       { ico: '❌', label: '오답 재시험', sub: '6단계', go: '', off: true },
     ],
@@ -122,7 +122,7 @@ export async function renderHub(name) {
     <div class="tiles">
       ${hub.tiles.map(t => {
         const n = t.count ? counts[t.count] : 0;
-        const sub = t.count ? (n ? `${n}편` : '목록 받는 중') : t.sub;
+        const sub = t.count ? (n ? `${n}${t.unit || '편'}` : (t.zero || '목록 받는 중')) : t.sub;
         // ‼ 0편이라고 잠그지 않는다. 목록을 아직 못 받았을 때 잠가 버리면
         //   사용자가 들어가서 "왜 비었는지"를 볼 길조차 막힌다(실제로 겪은 일).
         const off = t.off;
@@ -147,6 +147,10 @@ function countByKind() {
     const k = classify.classify(f).kind;
     out[k] = (out[k] || 0) + 1;
   }
+  // 복습은 문서가 아니라 카드다 — 스토어에서 가져온다
+  const rev = get('review');
+  out.due = rev.due || 0;
+  out.cards = rev.total || 0;
   return out;
 }
 

@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v25';   // v24 갱신 · v25 스캔을 이어서 할 수 있게
+const SHELL_CACHE = 'templum-shell-v26';   // v25 스캔 재개 · v26 복습(5단계)
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
@@ -37,13 +37,14 @@ const SHELL_FILES = [
   './js/data/doc-content.js', './js/data/doc-rules.js',
   './js/data/audio.js', './js/data/id3.js',
   './js/data/answers.js', './js/data/outbox.js',
-  './js/data/drive-files.js', './js/data/uplink.js',
+  './js/data/drive-files.js', './js/data/uplink.js', './js/data/review.js',
   './js/features/shell.js', './js/features/home.js',
   './js/features/list/list.js', './js/features/list/browse.js',
   './js/features/viewer/viewer.js', './js/features/viewer/inject.js',
   './js/features/viewer/frame-bridge.js', './js/features/viewer/toolbar.js',
   './js/features/tts/player.js', './js/features/tts/normalize.js',
   './js/features/settings/settings.js', './js/features/update.js',
+  './js/features/review/review.js',
   './vendor/tts_player.js',
   './vendor/mathjax/es5/tex-mml-chtml.js',
 ];

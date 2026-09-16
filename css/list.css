@@ -163,3 +163,51 @@
 }
 .set-sub { margin: 4px 2px 8px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 .set-row .v small { font-weight: 500; color: var(--ink-3); }
+
+/* ── 복습 카드 ────────────────────────────────────────────────────── */
+
+.rv { display: flex; flex-direction: column; min-height: calc(100vh - var(--topbar-h) - var(--tabbar-h) - 40px); }
+.rv-top { display: flex; align-items: center; gap: 8px; padding: 2px 2px 10px; font-size: 12px; color: var(--ink-3); }
+.rv-count { font-variant-numeric: tabular-nums; font-weight: 700; }
+.rv-sub { padding: 2px 8px; border-radius: 9px; background: var(--surface-2); }
+.rv-lvl { margin-left: auto; color: var(--gold); letter-spacing: 1px; }
+
+.rv-card {
+  flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 14px;
+  padding: 22px 18px; background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow);
+}
+.rv-face { font-size: 19px; font-weight: 700; line-height: 1.5; color: var(--ink); word-break: break-word; }
+.rv-card.flipped .rv-face { font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.rv-back {
+  font-size: 17px; line-height: 1.6; color: var(--ink); word-break: break-word;
+  padding-top: 14px; border-top: 2px solid var(--gold);
+}
+.rv-weak { font-size: 12px; color: #8a5a20; line-height: 1.5; }
+.rv-src { font-size: 11.5px; color: var(--ink-3); }
+
+.rv-flip {
+  margin-top: 14px; min-height: 56px; width: 100%;
+  border: 1px solid var(--rule); border-radius: 12px;
+  background: var(--navy); color: var(--cream); font-size: 16px; font-weight: 700;
+}
+.rv-grade { display: flex; gap: 8px; margin-top: 14px; }
+.rv-b {
+  flex: 1 1 0; min-height: 60px; border-radius: 12px; border: 1px solid var(--rule);
+  font-size: 16px; font-weight: 700; background: var(--surface); color: var(--ink);
+}
+.rv-b.g-again { background: #fbeaea; color: #9a3b32; border-color: #e5bdb8; }
+.rv-b.g-hard { background: #fdf0e0; color: #8a5a20; border-color: #e5cda3; }
+.rv-b.g-good { background: #e8f0e9; color: #2f6b48; border-color: #b6d2c0; }
+.rv-b:active { transform: scale(.97); }
+
+.rv-done { text-align: center; padding: 40px 10px 20px; }
+.rv-done-n { font-size: 44px; font-weight: 800; color: var(--gold); line-height: 1.1; }
+.rv-done p { margin: 10px 0 0; color: var(--ink-2); font-size: 14px; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .rv-b.g-again { background: #331f1d; color: #e59a92; border-color: #57312c; }
+  :root:not([data-theme="light"]) .rv-b.g-hard { background: #2e2418; color: #e0b273; border-color: #55432a; }
+  :root:not([data-theme="light"]) .rv-b.g-good { background: #1e2e24; color: #8fd0a8; border-color: #31503d; }
+  :root:not([data-theme="light"]) .rv-weak { color: #e0b273; }
+}

@@ -16,6 +16,7 @@ import * as browse from './features/list/browse.js';
 import * as settings from './features/settings/settings.js';
 import * as viewer from './features/viewer/viewer.js';
 import * as update from './features/update.js';
+import * as reviewUi from './features/review/review.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -48,6 +49,8 @@ function routes() {
   router.route('#/settings/storage', () => settings.renderStorage());
   router.route('#/settings/display', () => settings.renderDisplay());
   router.route('#/settings/log', () => settings.renderLog());
+
+  router.route('#/review/today', () => reviewUi.renderToday());
 
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
 

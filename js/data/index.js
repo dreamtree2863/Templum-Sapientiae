@@ -20,11 +20,12 @@ import * as answers from './answers.js';
 import * as outbox from './outbox.js';
 import * as driveFiles from './drive-files.js';
 import * as uplink from './uplink.js';
+import * as review from './review.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, log };
+export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, log };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {
@@ -35,10 +36,12 @@ export async function boot() {
   docContent.configure({ getToken: auth.getToken });
   audio.configure({ getToken: auth.getToken });
   driveFiles.configure({ getToken: auth.getToken });
+  review.configure({ getToken: auth.getToken });
   const cached = await catalog.load();          // 캐시를 먼저 보여 준다(체감 속도)
   const a = await auth.init();
   idb.requestPersist();                          // 캐시가 함부로 비워지지 않게 요청
   await outbox.publish();                        // 보낼 것이 몇 건인지 홈에 바로 뜨게
+  await review.load();                           // 오프라인에서도 복습이 되게 사본을 올린다
   return { signedIn: a.signedIn, offline: a.offline, cached };
 }
 
