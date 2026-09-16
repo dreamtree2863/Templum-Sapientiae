@@ -17,6 +17,7 @@ import * as settings from './features/settings/settings.js';
 import * as viewer from './features/viewer/viewer.js';
 import * as update from './features/update.js';
 import * as reviewUi from './features/review/review.js';
+import * as mcqUi from './features/mcq/mcq.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -51,6 +52,8 @@ function routes() {
   router.route('#/settings/log', () => settings.renderLog());
 
   router.route('#/review/today', () => reviewUi.renderToday());
+  router.route('#/review/mcq', () => mcqUi.renderSets());
+  router.route('#/review/wrong', () => mcqUi.renderWrong());
 
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
 

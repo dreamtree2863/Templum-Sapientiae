@@ -90,8 +90,8 @@ const HUBS = {
     tiles: [
       { ico: '🗓️', label: '오늘의 복습', sub: '', go: '#/review/today', count: 'due', unit: '장', zero: '오늘은 없음' },
       { ico: '🃏', label: '복습 카드', sub: '가진 카드', go: '#/review/today', count: 'cards', unit: '장', zero: '아직 없음' },
-      { ico: '🔘', label: '객관식 시험', sub: '6단계', go: '', off: true },
-      { ico: '❌', label: '오답 재시험', sub: '6단계', go: '', off: true },
+      { ico: '🔘', label: '객관식 시험', sub: '탭만으로', go: '#/review/mcq' },
+      { ico: '❌', label: '오답 재시험', sub: '틀린 것만', go: '#/review/wrong' },
     ],
   },
   settings: {

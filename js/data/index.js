@@ -21,11 +21,12 @@ import * as outbox from './outbox.js';
 import * as driveFiles from './drive-files.js';
 import * as uplink from './uplink.js';
 import * as review from './review.js';
+import * as mcq from './mcq.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, log };
+export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, log };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {
@@ -37,6 +38,7 @@ export async function boot() {
   audio.configure({ getToken: auth.getToken });
   driveFiles.configure({ getToken: auth.getToken });
   review.configure({ getToken: auth.getToken });
+  mcq.configure({ getToken: auth.getToken });
   const cached = await catalog.load();          // 캐시를 먼저 보여 준다(체감 속도)
   const a = await auth.init();
   idb.requestPersist();                          // 캐시가 함부로 비워지지 않게 요청
