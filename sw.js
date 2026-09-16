@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v21';   // v20 낭독 · v21 문서 CORS 교정
+const SHELL_CACHE = 'templum-shell-v22';   // v21 CORS 교정 · v22 설정 화면 + 답안 큐
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
@@ -36,11 +36,13 @@ const SHELL_FILES = [
   './js/data/catalog.js', './js/data/classify.js',
   './js/data/doc-content.js', './js/data/doc-rules.js',
   './js/data/audio.js', './js/data/id3.js',
+  './js/data/answers.js', './js/data/outbox.js',
   './js/features/shell.js', './js/features/home.js',
   './js/features/list/list.js', './js/features/list/browse.js',
   './js/features/viewer/viewer.js', './js/features/viewer/inject.js',
   './js/features/viewer/frame-bridge.js', './js/features/viewer/toolbar.js',
   './js/features/tts/player.js', './js/features/tts/normalize.js',
+  './js/features/settings/settings.js',
   './vendor/tts_player.js',
   './vendor/mathjax/es5/tex-mml-chtml.js',
 ];

@@ -13,7 +13,7 @@ import * as router from '../../core/router.js';
 import * as idb from '../../core/idb.js';
 import { get, patch } from '../../core/store.js';
 import * as log from '../../core/log.js';
-import { catalog, docContent, docRules, markOpened } from '../../data/index.js';
+import { catalog, docContent, docRules, markOpened, captureAnswers } from '../../data/index.js';
 import { inject, injectMathLive, applyTheme, applyScale } from './inject.js';
 import * as bridge from './frame-bridge.js';
 import { mountToolbar, setPlayState } from './toolbar.js';
@@ -90,6 +90,13 @@ export async function open(fileId) {
 
   frame.src = blobUrl;
 
+  // ‼ 폰은 언제든 죽는다 — 닫을 때만 거두면 홈 버튼 한 번에 답이 날아간다.
+  //   화면이 가려지는 순간에도 거둔다(그때가 마지막 기회일 수 있다).
+  if (plan.worksheet) {
+    cur.onHide = () => { if (document.visibilityState === 'hidden') harvest(); };
+    document.addEventListener('visibilitychange', cur.onHide);
+  }
+
   const bar = mountToolbar(wrap, {
     file, plan,
     onTheme: (t) => { applyThemeAll(t); },
@@ -102,6 +109,14 @@ export async function open(fileId) {
 }
 
 function hideVeil(veil) { veil?.classList.add('gone'); }
+
+/** 이 문서의 답안을 거둬 큐에 넣는다(바뀐 게 있을 때만).
+ *  ‼ 맥락을 **인자로** 받는다 — close() 는 cur 를 비운 뒤에 부르기 때문에
+ *    전역을 보게 두면 정작 떠날 때 아무것도 못 거둔다. */
+function harvest(c = cur) {
+  if (!c || !c.plan?.worksheet || !c.prefix) return;
+  captureAnswers(c.file, c.prefix).catch(e => log.warn('viewer', '답안 수집 실패', e));
+}
 
 /* 낭독 — 문서를 보며 따라 읽는다. 처음 누를 때만 붙이고, 그 뒤엔 재생/일시정지. */
 async function onPlay(frame, file, bar) {
@@ -145,11 +160,12 @@ export async function close() {
   if (!cur) return;
   const c = cur;
   cur = null;
+  harvest(c);                                      // 떠나기 전에 답을 거둔다(cur 는 이미 비었다)
+  try { document.removeEventListener('visibilitychange', c.onHide); } catch (e) {}
   try { tts.stop(); } catch (e) {}                 // 문서를 떠나면 소리도 멈춘다
   try { c.unlisten?.(); } catch (e) {}
   try { c.frame?.remove(); } catch (e) {}          // 프레임을 통째로 버린다(히스토리 오염 차단)
   try { URL.revokeObjectURL(c.blobUrl); } catch (e) {}
-  // 4단계에서: 여기서 답안을 모아 outbox 에 넣는다
 }
 
 export function current() { return cur; }

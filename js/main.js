@@ -13,6 +13,7 @@ import * as shell from './features/shell.js';
 import * as home from './features/home.js';
 import * as list from './features/list/list.js';
 import * as browse from './features/list/browse.js';
+import * as settings from './features/settings/settings.js';
 import * as viewer from './features/viewer/viewer.js';
 
 const THEME_KEY = 'ui.theme';
@@ -41,6 +42,11 @@ function routes() {
   router.route('#/lib/docs', () => list.renderList(router.query()));
   // #/browse?root=recall  또는  #/browse?p=archive/백지 인출/경제학 — 수준별로 내려간다
   router.route('#/browse', () => browse.renderBrowse(router.query()));
+
+  router.route('#/settings/sync', () => settings.renderSync());
+  router.route('#/settings/storage', () => settings.renderStorage());
+  router.route('#/settings/display', () => settings.renderDisplay());
+  router.route('#/settings/log', () => settings.renderLog());
 
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
 

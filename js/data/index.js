@@ -16,11 +16,13 @@ import * as driveApi from './drive-api.js';
 import * as docContent from './doc-content.js';
 import * as docRules from './doc-rules.js';
 import * as audio from './audio.js';
+import * as answers from './answers.js';
+import * as outbox from './outbox.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, audio, log };
+export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, log };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {
@@ -33,6 +35,7 @@ export async function boot() {
   const cached = await catalog.load();          // 캐시를 먼저 보여 준다(체감 속도)
   const a = await auth.init();
   idb.requestPersist();                          // 캐시가 함부로 비워지지 않게 요청
+  await outbox.publish();                        // 보낼 것이 몇 건인지 홈에 바로 뜨게
   return { signedIn: a.signedIn, offline: a.offline, cached };
 }
 
@@ -63,4 +66,38 @@ export async function inProgress(n = 5) {
 /** 저장 공간 현황 — 설정 화면. */
 export async function storageInfo() {
   return { local: kv.usage(), idb: await idb.estimate() };
+}
+
+/**
+ * 학습지 답안을 거둬 큐에 넣는다 — 바뀐 게 있을 때만.
+ *
+ * ‼ 폰은 언제든 죽는다. 그래서 문서를 닫을 때만이 아니라 화면이 가려질 때도 부른다.
+ *   그 말은 **여러 번 겹쳐 불린다**는 뜻이다. 지문 확인이 IndexedDB 왕복을 기다리는
+ *   사이 다음 호출이 끼어들면 둘 다 "바뀌었다"고 보고 같은 답이 여러 건 쌓인다
+ *   (실측: 2건이어야 할 것이 5건). 그래서 문서마다 **줄을 세우고**, 지문은
+ *   메모리에도 들고 있는다.
+ */
+const capturing = new Map();      // docId → 진행 중인 약속(줄 세우기)
+const lastSig = new Map();        // docId → 마지막으로 보낸 지문
+
+export function captureAnswers(file, prefix) {
+  if (!file || !prefix) return Promise.resolve(null);
+  const prev = capturing.get(file.id) || Promise.resolve(null);
+  const next = prev.catch(() => null).then(() => doCapture(file, prefix));
+  capturing.set(file.id, next);
+  next.finally(() => { if (capturing.get(file.id) === next) capturing.delete(file.id); });
+  return next;
+}
+
+async function doCapture(file, prefix) {
+  const values = answers.collect(prefix);
+  if (!Object.keys(values).length) return null;
+  const sig = answers.signature(values);
+  if (lastSig.get(file.id) === sig) return null;
+  const was = await idb.get('answerSig', file.id).catch(() => null);
+  if (was && was.sig === sig) { lastSig.set(file.id, sig); return null; }
+  lastSig.set(file.id, sig);                     // 먼저 새겨 둔다 — 뒤따라온 호출이 멈추도록
+  const id = await outbox.enqueue(answers.event(file, prefix, values));
+  await idb.put('answerSig', file.id, { sig, at: Date.now() }).catch(() => {});
+  return id;
 }
