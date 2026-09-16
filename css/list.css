@@ -1,0 +1,72 @@
+/* list.css — 검색 · 칩 · 문서 줄. */
+
+.search-row { position: sticky; top: calc(var(--topbar-h) + var(--safe-t)); z-index: 10; padding: 6px 0 8px; background: var(--bg); }
+.search-row input[type="search"] {
+  width: 100%; min-height: var(--tap);
+  padding: 10px 16px; border: 1px solid var(--rule); border-radius: 22px;
+  background: var(--surface); font-size: 15px;
+  -webkit-appearance: none; appearance: none;
+}
+.search-row input[type="search"]:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
+
+/* 칩 — 폴더 경로가 곧 분류다 */
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto; min-height: 34px; padding: 6px 13px;
+  border: 1px solid var(--rule); border-radius: 18px;
+  background: var(--surface); color: var(--ink-2);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.chip i { font-style: normal; color: var(--ink-3); font-weight: 500; margin-left: 3px; font-size: 11px; }
+.chip.on { background: var(--navy); border-color: var(--navy); color: var(--cream); }
+.chip.on i { color: rgba(253,251,247,.7); }
+
+.list-count { font-size: 12px; color: var(--ink-3); padding: 0 2px 6px; }
+
+/* 문서 줄 */
+.doc-list { display: flex; flex-direction: column; gap: 6px; }
+.doc-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  width: 100%; padding: 11px 13px; text-align: left;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.doc-row:active { border-color: var(--gold); background: var(--surface-2); }
+.doc-name { font-size: 14.5px; font-weight: 600; line-height: 1.35; color: var(--ink); word-break: break-word; }
+.doc-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-3); }
+.doc-meta .where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 종류 배지 — 무엇인지 한눈에 */
+.kind {
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 9px;
+  background: var(--surface-2); color: var(--ink-2);
+  font-size: 10.5px; font-weight: 700;
+}
+.k-recall { background: #e8f0e9; color: #2f6b48; }
+.k-quiz { background: #eee8f4; color: #5b4079; }
+.k-summary, .k-topic_summary { background: #fdf0e0; color: #8a5a20; }
+.k-q_only, .k-q_toc, .k-q_toc_a { background: #e7eef7; color: #2a4d76; }
+.k-grading_criteria, .k-exam_criteria { background: #fbeaea; color: #9a3b32; }
+.k-heavy { background: #fbeaea; color: #9a3b32; }
+.k-audio { background: transparent; padding: 0; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .k-recall { background: #1e2e24; color: #8fd0a8; }
+  :root:not([data-theme="light"]) .k-quiz { background: #272134; color: #c2a8e0; }
+  :root:not([data-theme="light"]) .k-summary,
+  :root:not([data-theme="light"]) .k-topic_summary { background: #2e2418; color: #e0b273; }
+  :root:not([data-theme="light"]) .k-q_only,
+  :root:not([data-theme="light"]) .k-q_toc,
+  :root:not([data-theme="light"]) .k-q_toc_a { background: #1b2734; color: #93bce0; }
+  :root:not([data-theme="light"]) .k-grading_criteria,
+  :root:not([data-theme="light"]) .k-exam_criteria,
+  :root:not([data-theme="light"]) .k-heavy { background: #331f1d; color: #e59a92; }
+}
+
+.more-btn {
+  width: 100%; margin-top: 10px; padding: 13px;
+  border: 1px dashed var(--rule); border-radius: 10px;
+  background: transparent; color: var(--ink-2); font-size: 13.5px; font-weight: 600;
+}
+.more-btn:active { border-color: var(--gold); color: var(--gold-dim); }

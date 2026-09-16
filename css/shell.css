@@ -1,0 +1,170 @@
+/* shell.css — 상단바 · 하단 탭바 · 홈 · 허브.
+ *
+ *  데스크톱의 3단 계층을 폰으로 옮긴 부분이다.
+ *      홈(배경사진 + 큰 타일 4개) → 허브(크림 바탕 + 2열 타일) → 기능
+ */
+
+/* ── 골격 ─────────────────────────────────────────────────────────── */
+#app { min-height: 100%; display: flex; flex-direction: column; }
+
+#topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+  height: calc(var(--topbar-h) + var(--safe-t));
+  padding: var(--safe-t) 8px 0;
+  background: var(--navy); color: var(--cream);
+  box-shadow: 0 1px 6px rgba(0,0,0,.18);
+}
+#topbar .title {
+  flex: 1; min-width: 0; margin: 0;
+  font-size: 16px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#topbar .iconbtn {
+  width: var(--tap); height: var(--tap);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cream); font-size: 20px; border-radius: 10px;
+}
+#topbar .iconbtn:active { background: rgba(255,255,255,.16); }
+
+/* 동기화 상태 — 점 하나로 말한다 */
+#sync-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
+  margin-right: 6px; background: var(--ink-3);
+}
+#sync-dot[data-state="ok"] { background: #4caf7d; }
+#sync-dot[data-state="pending"] { background: var(--gold); }
+#sync-dot[data-state="offline"] { background: #7a7a7a; }
+
+#main { flex: 1; min-height: 0; padding: var(--gap); padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 16px); }
+
+/* ── 하단 탭바 — 한 손 조작의 핵심 ─────────────────────────────────── */
+#tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  height: calc(var(--tabbar-h) + var(--safe-b));
+  padding-bottom: var(--safe-b);
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+}
+#tabbar button {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; color: var(--ink-3); font-size: 11px; font-weight: 600;
+}
+#tabbar button .ico { font-size: 20px; line-height: 1; }
+#tabbar button[aria-current="page"] { color: var(--gold-dim); }
+#tabbar button:active { background: var(--surface-2); }
+#tabbar .badge {
+  position: absolute; transform: translate(14px, -12px);
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--gold); color: #fff;
+  border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center;
+}
+
+/* ── 홈 — 배경사진은 여기에만 ──────────────────────────────────────── */
+#screen-home {
+  min-height: calc(100vh - var(--topbar-h) - var(--tabbar-h));
+  margin: calc(var(--gap) * -1);
+  padding: 28px 20px calc(var(--tabbar-h) + var(--safe-b) + 24px);
+  background:
+    linear-gradient(160deg, rgba(58,74,99,.92) 0%, rgba(27,38,59,.95) 55%, rgba(13,21,37,.97) 100%);
+  color: var(--cream);
+}
+.home-head { text-align: center; margin-bottom: 20px; }
+.home-title {
+  margin: 0; font-family: 'Playfair Display', Georgia, serif;
+  font-size: 34px; font-weight: 700; letter-spacing: 1px;
+}
+.home-sub { margin: 4px 0 0; color: var(--gold); font-size: 13px; font-style: italic; letter-spacing: 2px; }
+
+/* 홈 위젯 — D-day · 오늘 복습 · 미전송 */
+.widgets { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 22px; }
+.widget {
+  flex: 1 1 0; min-width: 96px; max-width: 160px;
+  padding: 10px 8px; border-radius: var(--r);
+  background: rgba(255,255,255,.08); border: 1px solid rgba(193,154,107,.35);
+  text-align: center;
+}
+.widget .n { display: block; font-size: 22px; font-weight: 800; color: var(--cream); line-height: 1.2; }
+.widget .k { display: block; font-size: 11px; color: rgba(253,251,247,.72); margin-top: 2px; }
+
+/* 큰 타일 4개 — 데스크톱의 nav-btn */
+.home-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.home-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 24px 12px; min-height: 108px;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(193,154,107,.4); border-radius: var(--r);
+  color: var(--cream);
+}
+.home-tile:active { background: rgba(193,154,107,.25); border-color: var(--gold); }
+.home-tile .ico { font-size: 30px; line-height: 1; }
+.home-tile .label { font-size: 15px; font-weight: 700; }
+.home-tile .sub { font-size: 11px; color: rgba(253,251,247,.65); }
+
+/* ── 허브 — 크림 바탕. 카드 안에 카드를 겹치지 않는다 ────────────────── */
+.hub-head { margin: 2px 0 14px; }
+.hub-head h2 {
+  margin: 0 0 6px; font-size: 20px; font-weight: 700; color: var(--ink);
+  padding-bottom: 8px; border-bottom: 2px solid var(--gold);
+}
+.hub-head p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 12px; text-align: left;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r);
+  box-shadow: var(--shadow); color: var(--ink);
+}
+.tile:active { border-color: var(--gold); background: var(--surface-2); }
+.tile .ico {
+  flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); font-size: 19px;
+}
+.tile .body { min-width: 0; }
+.tile .label { display: block; font-size: 14px; font-weight: 700; line-height: 1.25; }
+.tile .sub { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.tile[disabled] { opacity: .45; }
+
+.back-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin: 0 0 8px; padding: 6px 2px;
+  color: var(--ink-2); font-size: 14px; font-weight: 600;
+}
+.back-btn:active { color: var(--gold-dim); }
+
+/* ── 알림 ─────────────────────────────────────────────────────────── */
+#toast-host { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-b) + 12px); z-index: 60; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.toast {
+  max-width: 88vw; padding: 11px 18px; border-radius: 22px;
+  background: rgba(27,38,59,.94); color: var(--cream);
+  font-size: 14px; box-shadow: var(--shadow-lift);
+  animation: toast-in .22s ease-out;
+}
+.toast.error { background: rgba(160,50,38,.95); }
+.toast.ok { background: rgba(37,95,64,.95); }
+@keyframes toast-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* 배너 색은 토큰으로 — 어두운 테마에서 글자가 사라지지 않게 */
+:root { --banner-bg: #fdf3e2; --banner-ink: #6b4d22; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --banner-bg: #2b2418; --banner-ink: #e6cfa4; }
+}
+:root[data-theme="dark"] { --banner-bg: #2b2418; --banner-ink: #e6cfa4; }
+
+.banner {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px; padding: 10px 12px;
+  background: var(--banner-bg); border: 1px solid var(--gold); border-radius: 10px;
+  color: var(--banner-ink); font-size: 13px;
+}
+
+.empty { padding: 40px 16px; text-align: center; color: var(--ink-3); font-size: 14px; line-height: 1.7; }
+.spinner {
+  display: inline-block; width: 16px; height: 16px; vertical-align: -2px;
+  border: 2.5px solid var(--gold); border-top-color: transparent;
+  border-radius: 50%; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

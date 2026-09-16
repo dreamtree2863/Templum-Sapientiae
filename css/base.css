@@ -1,0 +1,110 @@
+/* base.css — 색·간격·글자의 단일 출처.
+ *
+ *  데스크톱(study_manager/web/style.css)과 같은 정체성을 쓴다.
+ *      남색 #1b263b · 금색 #c19a6b · 크림 #fdfbf7
+ *  다만 폰으로 번역한다 — 배경사진은 홈에만, 카드 안에 카드를 겹치지 않는다.
+ */
+
+:root {
+  /* 정체성 */
+  --navy: #1b263b;
+  --navy-deep: #0d1b2a;
+  --gold: #c19a6b;
+  --gold-dim: #a98050;
+  --cream: #fdfbf7;
+
+  /* 표면 — 밝은 테마 */
+  --bg: #fdfbf7;
+  --surface: #ffffff;
+  --surface-2: #f4f1e8;
+  --ink: #23201b;
+  --ink-2: #5a564d;
+  --ink-3: #8a8578;
+  --rule: #e2ddd0;
+
+  /* 뜻이 있는 색 */
+  --ok: #2f6b48;
+  --warn: #9a6a30;
+  --bad: #c0392b;
+
+  /* 치수 */
+  --topbar-h: 52px;
+  --tabbar-h: 58px;
+  --tap: 44px;                 /* 손가락이 닿아야 하는 최소 크기 */
+  --r: 12px;
+  --gap: 12px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+
+  --shadow: 0 2px 10px rgba(30, 24, 10, .07);
+  --shadow-lift: 0 6px 20px rgba(30, 24, 10, .14);
+
+  color-scheme: light dark;
+}
+
+/* 어두운 테마 — 시스템 설정을 따르되, 사용자가 고른 값이 이긴다 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c;
+    --surface: #1c2027;
+    --surface-2: #232830;
+    --ink: #e8e4db;
+    --ink-2: #b4afa3;
+    --ink-3: #85806f;
+    --rule: #333a44;
+    --cream: #e8e4db;
+    --shadow: 0 2px 10px rgba(0, 0, 0, .3);
+    --shadow-lift: 0 6px 20px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c;
+  --surface: #1c2027;
+  --surface-2: #232830;
+  --ink: #e8e4db;
+  --ink-2: #b4afa3;
+  --ink-3: #85806f;
+  --rule: #333a44;
+  --cream: #e8e4db;
+  --shadow: 0 2px 10px rgba(0, 0, 0, .3);
+  --shadow-lift: 0 6px 20px rgba(0, 0, 0, .45);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', '맑은 고딕', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: contain;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; }
+a { color: var(--gold-dim); }
+
+/* 손가락이 닿는 것은 44px 아래로 내려가지 않는다 */
+button, [role="button"], .tap { min-height: var(--tap); }
+
+/* 눌림 — 폰에는 hover 가 없다 */
+.pressable { transition: transform .08s ease, background-color .12s ease; }
+.pressable:active { transform: scale(.985); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* [hidden] 은 기본 display:none 이라 .iconbtn{display:flex} 같은 규칙에 진다.
+   숨기라고 했으면 숨어야 한다. */
+[hidden] { display: none !important; }
+.hidden { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
