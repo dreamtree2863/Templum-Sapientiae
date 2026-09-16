@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v23';   // v22 설정·큐 · v23 폰→PC 보내기
+const SHELL_CACHE = 'templum-shell-v24';   // v23 폰→PC 보내기 · v24 갱신이 실제로 먹게
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
@@ -43,7 +43,7 @@ const SHELL_FILES = [
   './js/features/viewer/viewer.js', './js/features/viewer/inject.js',
   './js/features/viewer/frame-bridge.js', './js/features/viewer/toolbar.js',
   './js/features/tts/player.js', './js/features/tts/normalize.js',
-  './js/features/settings/settings.js',
+  './js/features/settings/settings.js', './js/features/update.js',
   './vendor/tts_player.js',
   './vendor/mathjax/es5/tex-mml-chtml.js',
 ];
@@ -70,6 +70,10 @@ self.addEventListener('message', (event) => {
   const d = event.data;
   if (d === 'skipWaiting') { self.skipWaiting(); return; }
   if (d && d.type === 'token' && d.token) swToken = d.token;
+  // 지금 도는 셸이 몇 판인지 — 설정 화면에 띄워 "왜 새 기능이 안 보이지"를 없앤다
+  if (d && d.type === 'version' && event.ports && event.ports[0]) {
+    event.ports[0].postMessage({ version: SHELL_CACHE });
+  }
 });
 
 /** <audio> 같은 직접 요청에는 인증 헤더가 없다 — 보관 토큰으로 채운다.
@@ -104,9 +108,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  /* ‼ 같은 출처라도 **미디어·Range 요청은 건드리지 않는다.**
+     가로채면 206(부분 응답)을 셸 캐시에 담게 되고, 그러면 오디오 탐색이 죽는다
+     — 낭독에서 문단을 눌러도 그 자리로 안 간다(실제로 물렸던 회귀). */
+  if (req.headers.has('range') || req.destination === 'audio' || req.destination === 'video') {
+    return;
+  }
+
   if (req.method === 'GET' && url.origin === self.location.origin) {
+    /* ‼ `cache: 'no-cache'` — 브라우저 HTTP 캐시를 건너뛰고 서버에 되묻는다(ETag).
+       이게 없으면 GitHub Pages 의 max-age 때문에 새 버전을 올려도 폰이 한참 동안
+       옛 파일을 쓴다. 실제로 "설정 화면은 뜨는데 새 단추가 없다"로 나타났다.
+       내용이 그대로면 304 라 데이터도 거의 안 든다. */
     event.respondWith(
-      fetch(req).then(resp => {
+      fetch(req, { cache: 'no-cache' }).then(resp => {
         if (resp.ok) {
           const clone = resp.clone();
           caches.open(SHELL_CACHE).then(c => c.put(req, clone)).catch(() => {});

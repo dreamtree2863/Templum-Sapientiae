@@ -15,6 +15,7 @@ import * as list from './features/list/list.js';
 import * as browse from './features/list/browse.js';
 import * as settings from './features/settings/settings.js';
 import * as viewer from './features/viewer/viewer.js';
+import * as update from './features/update.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -59,22 +60,6 @@ function routes() {
 }
 
 
-/* ── 서비스워커 ───────────────────────────────────────────────────── */
-function registerSW() {
-  if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('./sw.js').then(reg => {
-    reg.addEventListener('updatefound', () => {
-      const sw = reg.installing;
-      sw?.addEventListener('statechange', () => {
-        if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-          shell.toast('새 버전이 준비됐습니다. 앱을 다시 열면 적용됩니다.');
-        }
-      });
-    });
-  }).catch(e => log.warn('sw', '등록 실패', e));
-  navigator.serviceWorker.addEventListener('controllerchange', () => data.auth.postTokenToSW());
-}
-
 /* ── 폰 → PC 보내기 ───────────────────────────────────────────────────
  *  폰은 언제든 앱이 죽고 지하철에서는 끊긴다. 그래서 기회가 생길 때마다 보낸다 —
  *  한 곳에만 걸어 두면 반드시 놓친다. (보내는 일 자체는 data/uplink.js)
@@ -97,7 +82,7 @@ async function boot() {
 
   shell.mount(document.getElementById('app'));
   routes();
-  registerSW();
+  update.registerSW();
 
   window.addEventListener('online', () => store.patch('ui', { online: true }));
   window.addEventListener('offline', () => store.patch('ui', { online: false }));

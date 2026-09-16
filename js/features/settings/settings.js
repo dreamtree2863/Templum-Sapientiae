@@ -10,6 +10,7 @@ import * as router from '../../core/router.js';
 import { get } from '../../core/store.js';
 import { auth, catalog, classify, log, outbox, uplink, refresh, storageInfo } from '../../data/index.js';
 import { applyThemeAll, applyScaleAll } from '../viewer/viewer.js';
+import { checkUpdate, runningVersion } from '../update.js';
 
 const esc = shell.escapeHtml;
 const SCALES = [0.9, 1, 1.15, 1.3];
@@ -24,6 +25,7 @@ export async function renderSync() {
       <button class="more-btn pressable" data-act="rescan">전체 다시 훑기</button>
       <button class="more-btn pressable" data-act="send">지금 PC 로 보내기</button>
       <button class="more-btn pressable" data-act="probe">폰 → PC 연결 시험</button>
+      <button class="more-btn pressable" data-act="update">앱 갱신 확인</button>
     </div>
     <div id="probe"></div>
     <p class="set-note">“전체 다시 훑기”는 Drive 를 처음부터 다시 셉니다.
@@ -34,6 +36,16 @@ export async function renderSync() {
     if (!b) return;
     if (b.dataset.act === 'send') { await onSend(el, b); return; }
     if (b.dataset.act === 'probe') { await onProbe(el, b); return; }
+    if (b.dataset.act === 'update') {
+      b.disabled = true; b.textContent = '확인 중…';
+      try {
+        const r = await checkUpdate();
+        shell.toast(!r.ok ? (r.reason || '확인 실패')
+          : r.found ? '새 버전이 있습니다 — 위 배너에서 적용하세요' : '이미 최신입니다', r.found ? 'ok' : '');
+      } catch (err) { shell.toast('확인 실패', 'error'); }
+      b.disabled = false; b.textContent = '앱 갱신 확인';
+      return;
+    }
     const force = b.dataset.act === 'rescan';
     b.disabled = true;
     b.textContent = force ? '훑는 중…' : '받는 중…';
@@ -102,6 +114,9 @@ async function onProbe(el, b) {
 
 async function syncFacts() {
   const c = get('catalog');
+  // ‼ "새 기능이 왜 안 보이지"를 없애는 한 줄 — 지금 도는 셸이 몇 판인지 보여 준다
+  let ver = '';
+  try { ver = await runningVersion(); } catch (e) { /* 무시 */ }
   const a = get('auth');
   const counts = {};
   for (const f of catalog.files()) {
@@ -119,6 +134,7 @@ async function syncFacts() {
     ['복기 퀴즈', (counts.quiz || 0) + '편', counts.quiz ? '' : 'warn'],
     ['낭독 음성', audio.toLocaleString() + '개', ''],
     ['보낼 기록', (get('outbox').pending || 0) + '건', ''],
+    ['앱 버전', ver ? ver.replace('templum-shell-', '') : '확인 불가', ver ? '' : 'warn'],
   ];
 }
 
