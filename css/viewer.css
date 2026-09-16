@@ -1,0 +1,63 @@
+/* viewer.css — 문서 화면.
+ *
+ *  iframe 이 제 스크롤을 갖는다. 부모가 ResizeObserver 로 높이를 맞추면
+ *  5MB 문서에서 수만 픽셀짜리 iframe 이 되어 안드로이드 크롬이 힘들어한다.
+ */
+
+/* 문서를 읽는 동안에는 셸 여백을 없애 화면을 온전히 문서에 준다 */
+body.reading #main { padding: 0; }
+/* 문서를 읽는 동안에는 하단 탭바를 치운다 — 문서를 가리고, 돌아갈 길은 상단 ← 로 충분하다 */
+body.reading #tabbar { display: none; }
+
+.doc-wrap {
+  position: fixed;
+  left: 0; right: 0;
+  top: calc(var(--topbar-h) + var(--safe-t));
+  bottom: 0;
+  background: var(--surface);
+}
+
+#doc-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface);
+}
+
+/* 베일 — 조판이 끝나기 전 글자가 튀는 것을 가린다.
+   데스크톱은 문서 안에 visibility:hidden 을 심지만(archive.js:108),
+   폰에서는 문서를 건드리지 않고 부모에서 덮는다. 결과는 같다. */
+.doc-veil {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--surface); color: var(--ink-3); font-size: 14px;
+  transition: opacity .18s ease;
+}
+.doc-veil.gone { opacity: 0; pointer-events: none; }
+
+/* 하단 툴바 — 엄지가 닿는 자리 */
+.doc-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px calc(6px + var(--safe-b));
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--rule);
+}
+@supports not (backdrop-filter: blur(6px)) {
+  .doc-bar { background: var(--surface); }
+}
+.doc-btn {
+  min-width: var(--tap); height: var(--tap);
+  display: flex; align-items: center; justify-content: center; gap: 1px;
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--surface); color: var(--ink); font-size: 15px; font-weight: 700;
+}
+.doc-btn small { font-size: 11px; font-weight: 700; }
+.doc-btn:active { background: var(--surface-2); border-color: var(--gold); }
+.doc-bar-gap { flex: 1; }
+.doc-note {
+  font-size: 11px; color: var(--ink-3); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
