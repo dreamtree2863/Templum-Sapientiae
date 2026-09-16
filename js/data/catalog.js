@@ -12,7 +12,7 @@ import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 import { patch, get } from '../core/store.js';
 import { emit, EVENTS } from '../core/bus.js';
-import { keepFile, isAudio, audioStem, docStem, classify, segments } from './classify.js';
+import { keepFile, isAudio, audioStem, docStem, classify, segments, isHiddenPath } from './classify.js';
 
 const ROOT_NAME = 'Templum';
 /* ‼ 커서 키를 v2 로 올린 이유 — 실제로 물린 함정이다.
@@ -30,9 +30,15 @@ let allFiles = [];
 let folderMap = {};          // folderId → {name, parentId}
 let fetchedAt = 0;
 let busy = false;
+let itemById = new Map();   // id → 오디오·종류가 붙은 항목(build 가 채운다)
 
 export const files = () => allFiles;
 export const templumId = () => rootId;
+
+/** 목록이 어디서 왔든(전체 스캔·증분·물려받은 옛 캐시) 내부 폴더는 털어 낸다. */
+function sanitize(list) {
+  return list.filter(f => !isHiddenPath(f.path));
+}
 
 /* ── 영속 (IndexedDB) ──────────────────────────────────────────────── */
 async function save() {
@@ -52,7 +58,7 @@ export async function load() {
     if (legacy) {
       const d = JSON.parse(legacy);
       if (d?.allFiles?.length) {
-        allFiles = d.allFiles; folderMap = d.folderMap || {}; fetchedAt = d.fetchedAt || 0;
+        allFiles = sanitize(d.allFiles); folderMap = d.folderMap || {}; fetchedAt = d.fetchedAt || 0;
         await save();
         log.info('catalog', `옛 캐시 ${allFiles.length}개를 IndexedDB 로 옮겼습니다`);
       }
@@ -61,7 +67,7 @@ export async function load() {
   } catch (e) { /* 무시 */ }
 
   if (!allFiles.length) {
-    allFiles = (await idb.get('catalog', 'files')) || [];
+    allFiles = sanitize((await idb.get('catalog', 'files')) || []);
     folderMap = (await idb.get('catalog', 'folderMap')) || {};
     const meta = (await idb.get('catalog', 'meta')) || {};
     rootId = meta.rootId || null;
@@ -86,6 +92,7 @@ function build(list) {
   }
   const groups = {};      // "archive/백지 인출/경제학" 같은 상위 경로 → 항목 배열
   const tree = {};        // 백과사전 폴더 트리
+  itemById = new Map();   // ‼ byId 가 돌려줄 것 — 낭독 오디오·종류가 붙은 항목
   for (const f of list) {
     if (isAudio(f.name)) continue;
     const info = classify(f);
@@ -94,6 +101,7 @@ function build(list) {
     const item = { ...f, ...info, seg, audio: audio ? { id: audio.id, name: audio.name } : null };
     const key = [seg.root, seg.kindFolder, seg.subject].filter(Boolean).join('/');
     (groups[key] || (groups[key] = [])).push(item);
+    itemById.set(f.id, item);
     if (seg.root === 'encyclopedia') addToTree(tree, f.path.split('/').slice(1), item);
   }
   return { groups, tree };
@@ -120,7 +128,7 @@ async function fullScan(onProgress) {
       emit(EVENTS.CATALOG_PROGRESS, { count: collected.length });
     },
   });
-  allFiles = collected;
+  allFiles = sanitize(collected);
   folderMap = fmap;
   fetchedAt = Date.now();
   // 전체를 훑었으니 증분 커서를 지금으로 다시 잡는다
@@ -180,7 +188,7 @@ async function applyChanges(entries) {
       path,
     });
   }
-  allFiles = Array.from(byId.values());
+  allFiles = sanitize(Array.from(byId.values()));
   fetchedAt = Date.now();
   await save();
   publish();
@@ -235,4 +243,7 @@ export function resolveRelative(fromFile, href) {
   return allFiles.find(f => f.path === fromFile.path && f.name === name) || null;
 }
 
-export function byId(id) { return allFiles.find(f => f.id === id) || null; }
+/* ‼ 낭독 오디오가 붙은 **항목**을 돌려준다.
+ *   날 파일 목록(allFiles)에는 audio 가 없다 — 그것만 돌려주던 탓에
+ *   음성이 있는 문서인데도 뷰어에 낭독 단추가 뜨지 않았다. */
+export function byId(id) { return itemById.get(id) || allFiles.find(f => f.id === id) || null; }

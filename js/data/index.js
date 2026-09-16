@@ -15,11 +15,12 @@ import * as classify from './classify.js';
 import * as driveApi from './drive-api.js';
 import * as docContent from './doc-content.js';
 import * as docRules from './doc-rules.js';
+import * as audio from './audio.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, log };
+export { auth, catalog, classify, docContent, docRules, audio, log };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {
@@ -28,6 +29,7 @@ export async function boot() {
     onUnauthorized: auth.onUnauthorized,
   });
   docContent.configure({ getToken: auth.getToken });
+  audio.configure({ getToken: auth.getToken });
   const cached = await catalog.load();          // 캐시를 먼저 보여 준다(체감 속도)
   const a = await auth.init();
   idb.requestPersist();                          // 캐시가 함부로 비워지지 않게 요청

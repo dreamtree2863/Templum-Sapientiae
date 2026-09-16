@@ -8,14 +8,16 @@ import * as shell from '../shell.js';
 
 const SCALES = [0.9, 1, 1.15, 1.3];
 
-export function mountToolbar(wrap, { file, plan, onTheme, onScale }) {
+export function mountToolbar(wrap, { file, plan, onTheme, onScale, onPlay }) {
   const ui = get('ui');
+  const hasAudio = !!(file && file.audio);
   const bar = document.createElement('div');
   bar.className = 'doc-bar';
   bar.innerHTML = `
     <button class="doc-btn" data-act="scale-down" aria-label="글자 작게">가<small>−</small></button>
     <button class="doc-btn" data-act="scale-up" aria-label="글자 크게">가<small>+</small></button>
     <button class="doc-btn" data-act="theme" aria-label="밝기">${themeIcon(ui.theme)}</button>
+    ${hasAudio ? `<button class="doc-btn play" data-act="play" aria-label="낭독">▶</button>` : ''}
     <span class="doc-bar-gap"></span>
     ${plan.graph ? `<span class="doc-note" title="작도칸이 있는 학습지입니다">✏️ 작도칸</span>` : ''}
     ${plan.worksheet ? `<span class="doc-note">답은 이 기기에 저장됩니다</span>` : ''}`;
@@ -25,6 +27,7 @@ export function mountToolbar(wrap, { file, plan, onTheme, onScale }) {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const cur = get('ui');
+    if (b.dataset.act === 'play') { onPlay?.(); return; }
     if (b.dataset.act === 'scale-up' || b.dataset.act === 'scale-down') {
       const i = SCALES.indexOf(cur.textScale);
       const at = i < 0 ? 1 : i;
@@ -48,4 +51,12 @@ export function mountToolbar(wrap, { file, plan, onTheme, onScale }) {
 
 function themeIcon(t) {
   return t === 'dark' ? '🌙' : t === 'light' ? '☀️' : '🌗';
+}
+
+/** 낭독 단추의 얼굴 — 지금 무슨 일이 일어나는지 손가락에 바로 알려 준다. */
+export function setPlayState(bar, st) {
+  const b = bar?.querySelector('[data-act="play"]');
+  if (!b) return;
+  b.textContent = st === 'playing' ? '⏸' : st === 'loading' ? '…' : '▶';
+  b.classList.toggle('on', st === 'playing');
 }

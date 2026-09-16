@@ -16,7 +16,8 @@ import * as log from '../../core/log.js';
 import { catalog, docContent, docRules, markOpened } from '../../data/index.js';
 import { inject, injectMathLive, applyTheme, applyScale } from './inject.js';
 import * as bridge from './frame-bridge.js';
-import { mountToolbar } from './toolbar.js';
+import { mountToolbar, setPlayState } from './toolbar.js';
+import * as tts from '../tts/player.js';
 
 let cur = null;          // {file, frame, blobUrl, unlisten, plan, prefix, scrollY}
 
@@ -89,10 +90,11 @@ export async function open(fileId) {
 
   frame.src = blobUrl;
 
-  mountToolbar(wrap, {
+  const bar = mountToolbar(wrap, {
     file, plan,
     onTheme: (t) => { applyThemeAll(t); },
     onScale: (s) => { applyScaleAll(s); },
+    onPlay: () => onPlay(frame, file, bar),
   });
 
   log.info('viewer', `${file.name} (${Math.round(doc.size / 1024)}KB)`
@@ -100,6 +102,15 @@ export async function open(fileId) {
 }
 
 function hideVeil(veil) { veil?.classList.add('gone'); }
+
+/* 낭독 — 문서를 보며 따라 읽는다. 처음 누를 때만 붙이고, 그 뒤엔 재생/일시정지. */
+async function onPlay(frame, file, bar) {
+  if (tts.current()?.file?.id === file.id) { tts.toggle(); return; }
+  setPlayState(bar, 'loading');
+  const ok = await tts.attach(file, frame, { onState: (st) => setPlayState(bar, st) });
+  if (!ok) { setPlayState(bar, 'stopped'); shell.toast('낭독을 열지 못했습니다'); return; }
+  tts.start();
+}
 
 function onLink(m, from) {
   if (m.kind === 'external') {
@@ -134,6 +145,7 @@ export async function close() {
   if (!cur) return;
   const c = cur;
   cur = null;
+  try { tts.stop(); } catch (e) {}                 // 문서를 떠나면 소리도 멈춘다
   try { c.unlisten?.(); } catch (e) {}
   try { c.frame?.remove(); } catch (e) {}          // 프레임을 통째로 버린다(히스토리 오염 차단)
   try { URL.revokeObjectURL(c.blobUrl); } catch (e) {}

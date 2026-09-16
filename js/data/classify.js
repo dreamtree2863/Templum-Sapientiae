@@ -18,6 +18,13 @@ export function keepFile(name) {
 }
 export function isAudio(name) { return AUDIO_RE.test(name); }
 
+/* 문서가 아닌 내부 폴더 — 데스크톱 encyclopedia/main_ui.py 의 `_HIDDEN_DIRS` 와 맞춘다.
+   `<문서>_낭독.parts` 는 낭독을 조각내 만들 때 쓰는 flac 캐시로, 문서마다 하나씩 생긴다.
+   ‼ 확장자만 걸러서는 부족하다 — 옛 앱의 캐시에는 flac 이 담겨 있어,
+     그 목록을 물려받으면 .parts 폴더가 그대로 목록에 뜬다. 경로로도 막는다. */
+const HIDDEN_DIR_RE = /(^|\/)(\.[^/]*|[^/]*\.parts|__pycache__)(\/|$)/;
+export function isHiddenPath(path) { return HIDDEN_DIR_RE.test(path || ''); }
+
 /** 오디오 파일명 → 문서 stem (확장자·'_낭독'/' 낭독' 제거, NFC 소문자) */
 export function audioStem(name) {
   return name.replace(AUDIO_RE, '').replace(/(_| )낭독$/, '').normalize('NFC').toLowerCase();

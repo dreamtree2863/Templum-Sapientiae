@@ -15,7 +15,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v19';   // v18 뷰어 · v19 수준별 탐색 + 증분커서 교정
+const SHELL_CACHE = 'templum-shell-v20';   // v19 수준별 탐색 · v20 낭독(3단계)
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';
 
@@ -30,10 +30,13 @@ const SHELL_FILES = [
   './js/data/index.js', './js/data/auth.js', './js/data/drive-api.js',
   './js/data/catalog.js', './js/data/classify.js',
   './js/data/doc-content.js', './js/data/doc-rules.js',
+  './js/data/audio.js', './js/data/id3.js',
   './js/features/shell.js', './js/features/home.js',
   './js/features/list/list.js', './js/features/list/browse.js',
   './js/features/viewer/viewer.js', './js/features/viewer/inject.js',
   './js/features/viewer/frame-bridge.js', './js/features/viewer/toolbar.js',
+  './js/features/tts/player.js', './js/features/tts/normalize.js',
+  './vendor/tts_player.js',
   './vendor/mathjax/es5/tex-mml-chtml.js',
 ];
 
