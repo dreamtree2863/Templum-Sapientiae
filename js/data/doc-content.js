@@ -13,7 +13,17 @@ import { HEAD_BYTES, prefixOf } from './doc-rules.js';
 import * as log from '../core/log.js';
 
 const MEDIA = 'https://www.googleapis.com/drive/v3/files/';
-const MTIME_HEADER = 'X-Doc-Mtime';
+
+/* ‼ mtime 을 **헤더로 보내면 문서가 하나도 안 열린다.**
+ *   `X-Doc-Mtime` 같은 비표준 헤더는 교차 출처에서 사전요청(preflight)을 부르는데,
+ *   Drive 의 Access-Control-Allow-Headers 에 그 이름이 없다 → 요청이 아예 못 나가고
+ *   "Failed to fetch". (실측: Authorization·Range 는 통과, X-Doc-Mtime 만 막힘.
+ *    로컬 시험은 같은 출처라 이 경로를 한 번도 지나지 않아 드러나지 않았다.)
+ *
+ *   그래서 질의로 싣는다. 질의는 사전요청을 부르지 않고, 서비스워커가 이 값을 읽은 뒤
+ *   **떼어 내고** Drive 로 보내므로 Drive 는 이런 것이 있는 줄도 모른다.
+ *   서비스워커가 없을 때는 아예 붙이지 않는다(그때는 재검증도 의미가 없다). */
+const MTIME_PARAM = '__mtime';
 
 let _getToken = () => null;
 export function configure({ getToken }) { if (getToken) _getToken = getToken; }
@@ -25,9 +35,10 @@ export function configure({ getToken }) { if (getToken) _getToken = getToken; }
  *   tail  뒤 20KB 문자열 — 문서의 PREFIX(답 저장 이름표)를 캐는 데만 쓴다
  */
 export async function fetchDoc(file, { signal } = {}) {
-  const url = MEDIA + encodeURIComponent(file.id) + '?alt=media';
+  const swOn = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+  const url = MEDIA + encodeURIComponent(file.id) + '?alt=media'
+    + (swOn && file.mtime ? '&' + MTIME_PARAM + '=' + encodeURIComponent(file.mtime) : '');
   const headers = { Authorization: 'Bearer ' + _getToken() };
-  if (file.mtime) headers[MTIME_HEADER] = String(file.mtime);
 
   const resp = await fetch(url, { headers, signal });
   if (resp.status === 401) throw new Error('로그인이 필요합니다.');

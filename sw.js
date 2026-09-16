@@ -2,7 +2,11 @@
  *
  *  ‼ DOC_CACHE 이름은 **이 파일만** 안다.
  *    옛 구조는 app.js:1330 에도 같은 문자열이 있어 한쪽만 고치면 조용히 어긋났다.
- *    앱은 이제 캐시 이름을 모르고, 재검증은 X-Doc-Mtime 헤더로 부탁만 한다.
+ *    앱은 이제 캐시 이름을 모르고, 재검증은 `?__mtime=` 질의로 부탁만 한다.
+ *
+ *  ‼ 그 부탁을 **헤더로 받으면 안 된다.** 비표준 헤더는 교차 출처에서 사전요청을
+ *    부르는데 Drive 가 그 이름을 허용하지 않아, 문서 요청이 통째로 "Failed to fetch"
+ *    가 된다. 질의로 받고 Drive 로 나가기 전에 떼어 낸다.
  *
  *  갈래
  *    · 셸(같은 출처 GET)      network-first → 실패 시 캐시
@@ -15,9 +19,10 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v20';   // v19 수준별 탐색 · v20 낭독(3단계)
+const SHELL_CACHE = 'templum-shell-v21';   // v20 낭독 · v21 문서 CORS 교정
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
-const MTIME_HEADER = 'x-doc-mtime';
+const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
+const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
 
 /* 워밍업 목록일 뿐이다 — 아래 fetch 처리기가 같은 출처 GET 을 런타임에 모두 캐시하므로
    여기 빠진 파일이 있어도 한 번 방문하면 오프라인에서 열린다. */
@@ -117,8 +122,16 @@ self.addEventListener('fetch', (event) => {
  */
 async function handleDoc(req) {
   const cache = await caches.open(DOC_CACHE);
-  const want = req.headers.get(MTIME_HEADER);
-  const key = new Request(req.url, { method: 'GET' });   // 헤더를 뺀 URL 만 키로
+
+  /* ‼ mtime 은 질의(__mtime)로 온다 — 헤더로 받으면 Drive 의 CORS 가 사전요청을
+     막아 요청 자체가 못 나간다("Failed to fetch"). 여기서 값을 빼내고 **떼어 낸 주소**로
+     Drive 에 나간다. 캐시 키도 떼어 낸 주소라 판 갈이가 되지 않는다. */
+  const u = new URL(req.url);
+  const want = u.searchParams.get(MTIME_PARAM) || req.headers.get(MTIME_HEADER);
+  u.searchParams.delete(MTIME_PARAM);
+  const clean = u.toString();
+  const key = new Request(clean, { method: 'GET' });     // 헤더를 뺀 URL 만 키로
+  const upstream = new Request(clean, { method: 'GET', headers: req.headers });
 
   if (want) {
     const hit = await cache.match(key);
@@ -126,7 +139,7 @@ async function handleDoc(req) {
   }
 
   try {
-    const resp = await fetch(withAuth(req), { cache: 'no-store' });
+    const resp = await fetch(withAuth(upstream), { cache: 'no-store' });
     if (resp.ok && resp.status === 200) {
       // mtime 을 응답에 새겨 둔다 — 다음에 견줄 기준
       const body = await resp.clone().blob();
