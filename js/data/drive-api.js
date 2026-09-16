@@ -69,44 +69,78 @@ export async function findFolderByName(name, parentId) {
   return res.files?.[0]?.id || null;
 }
 
+/** 폴더 하나를 훑는다 — 재개 가능한 스캔의 최소 단위. */
+async function listOneFolder(id, path, keep) {
+  const files = [];
+  const folders = [];
+  let pageToken;
+  do {
+    const params = {
+      q: `'${id}' in parents and trashed=false`,
+      fields: 'nextPageToken, files(id,name,mimeType,modifiedTime,size)',
+      pageSize: 1000,
+    };
+    if (pageToken) params.pageToken = pageToken;
+    const res = await driveFetch('files', params);
+    for (const f of (res.files || [])) {
+      if (f.mimeType === 'application/vnd.google-apps.folder') {
+        folders.push({ id: f.id, name: f.name, parentId: id, path: [...path, f.name] });
+      } else if (!keep || keep(f.name)) {
+        files.push({
+          id: f.id,
+          name: f.name,
+          mtime: Date.parse(f.modifiedTime),
+          size: Number(f.size) || 0,
+          path: path.join('/'),       // Templum 내부 상대 경로
+        });
+      }
+    }
+    pageToken = res.nextPageToken;
+  } while (pageToken);
+  return { files, folders };
+}
+
 /**
- * 하위 폴더까지 훑어 문서·오디오 파일을 전부 수집한다(재귀 아닌 명시 스택).
- *   onBatch(batch[])              페이지마다 — 진행 표시용
+ * 하위 폴더까지 훑어 문서·오디오 파일을 전부 수집한다.
+ *   onBatch(batch[])              파일을 찾을 때마다 — 진행 표시·중간 저장용
  *   onFolder({id,name,parentId})  폴더 발견 시 — 폴더맵 구축(증분 동기화에 필수)
  *   keep(name)                    이 파일을 담을지 판정 (classify.js 가 준다)
+ *   onCheckpoint(stack)           남은 일감 — 여기서 끊겨도 이어 갈 수 있게
+ *   stack                         이어 할 지점(앞서 받은 checkpoint)
+ *
+ * ‼ 폰에서 이 스캔이 끝까지 못 가는 것이 실제 문제였다. 폴더가 570여 개인데
+ *   하나씩 차례로 물으면 몇 분이 걸리고, 그 사이 화면이 꺼지거나 앱이 뒤로 가면
+ *   통째로 날아가 다음에 **처음부터** 다시 했다. 그래서 둘을 고쳤다:
+ *     · 여러 폴더를 동시에 묻는다(오가는 횟수를 몇 분의 일로)
+ *     · 남은 일감을 밖으로 흘려 중간에 저장해 두게 한다
  */
-export async function listAllFilesUnder(folderId, { onBatch, onFolder, keep }) {
-  const stack = [{ id: folderId, path: [] }];
+export async function listAllFilesUnder(folderId, {
+  onBatch, onFolder, keep, onCheckpoint, stack: resume, concurrency = 5,
+} = {}) {
+  const stack = (resume && resume.length) ? resume.slice() : [{ id: folderId, path: [] }];
+  let since = 0;
+
   while (stack.length) {
-    const { id, path } = stack.pop();
-    let pageToken;
-    do {
-      const params = {
-        q: `'${id}' in parents and trashed=false`,
-        fields: 'nextPageToken, files(id,name,mimeType,modifiedTime,size)',
-        pageSize: 500,
-      };
-      if (pageToken) params.pageToken = pageToken;
-      const res = await driveFetch('files', params);
-      const batch = [];
-      for (const f of (res.files || [])) {
-        if (f.mimeType === 'application/vnd.google-apps.folder') {
-          stack.push({ id: f.id, path: [...path, f.name] });
-          if (onFolder) onFolder({ id: f.id, name: f.name, parentId: id });
-        } else if (!keep || keep(f.name)) {
-          batch.push({
-            id: f.id,
-            name: f.name,
-            mtime: Date.parse(f.modifiedTime),
-            size: Number(f.size) || 0,
-            path: path.join('/'),       // Templum 내부 상대 경로
-          });
-        }
+    const take = stack.splice(0, concurrency);
+    let results;
+    try {
+      results = await Promise.all(take.map(n => listOneFolder(n.id, n.path, keep)));
+    } catch (e) {
+      stack.unshift(...take);                       // 실패한 묶음은 되돌려 놓는다
+      if (onCheckpoint) await onCheckpoint(stack);  // 여기까지는 살린다
+      throw e;
+    }
+    for (const r of results) {
+      for (const f of r.folders) {
+        stack.push({ id: f.id, path: f.path });
+        if (onFolder) onFolder({ id: f.id, name: f.name, parentId: f.parentId });
       }
-      if (batch.length && onBatch) onBatch(batch);
-      pageToken = res.nextPageToken;
-    } while (pageToken);
+      if (r.files.length && onBatch) onBatch(r.files);
+      since += r.files.length;
+    }
+    if (onCheckpoint && since >= 400) { since = 0; await onCheckpoint(stack); }
   }
+  if (onCheckpoint) await onCheckpoint([]);         // 다 끝났다
 }
 
 /* ── 증분 동기화 (Drive Changes API) ─────────────────────────────────── */

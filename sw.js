@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v24';   // v23 폰→PC 보내기 · v24 갱신이 실제로 먹게
+const SHELL_CACHE = 'templum-shell-v25';   // v24 갱신 · v25 스캔을 이어서 할 수 있게
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다

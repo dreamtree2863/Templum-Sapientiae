@@ -113,14 +113,55 @@ function addToTree(node, parts, item) {
   addToTree(node[head] || (node[head] = {}), rest, item);
 }
 
-/* ── 전체 스캔 ─────────────────────────────────────────────────────── */
+/* ── 전체 스캔 ───────────────────────────────────────────────────────
+ *
+ *  ‼ 폰에서 이 스캔이 **끝까지 못 가는 것**이 실제 문제였다.
+ *    Templum 아래 폴더가 570여 개인데, 옛 구조는 끝날 때까지 아무것도 저장하지
+ *    않았다. 화면이 꺼지거나 앱이 뒤로 가면 통째로 날아가고 다음에 처음부터 —
+ *    그래서 새로고침을 아무리 눌러도 학습지가 영영 0편이었다.
+ *
+ *    이제 남은 일감과 여기까지 모은 것을 중간중간 저장하고, 다음 번에 **이어서**
+ *    한다. 중간 결과도 바로 화면에 보여 준다(숫자가 오르는 것이 보여야 한다).
+ */
+const SCAN_KEY = 'scan';          // idb 'catalog' — {rootId, stack, files, folderMap, at}
+const SCAN_TTL = 24 * 3600 * 1000;
+
 async function fullScan(onProgress) {
   rootId = await api.findFolderByName(ROOT_NAME, null);
   if (!rootId) throw new Error(`Drive 에서 '${ROOT_NAME}' 폴더를 찾지 못했습니다.`);
-  const collected = [];
-  const fmap = {};
+
+  let collected = [];
+  let fmap = {};
+  let stack = null;
+
+  // 하다 만 것이 있으면 이어서
+  const saved = await idb.get('catalog', SCAN_KEY).catch(() => null);
+  if (saved && saved.rootId === rootId && Date.now() - (saved.at || 0) < SCAN_TTL
+      && Array.isArray(saved.stack) && saved.stack.length) {
+    collected = saved.files || [];
+    fmap = saved.folderMap || {};
+    stack = saved.stack;
+    log.info('catalog', `하다 만 스캔을 이어서 — ${collected.length}개까지 받아 둠, 남은 폴더 ${stack.length}개`);
+  }
+
+  const checkpoint = async (remaining) => {
+    if (remaining.length) {
+      await idb.put('catalog', SCAN_KEY, {
+        rootId, stack: remaining, files: collected, folderMap: fmap, at: Date.now(),
+      }).catch(() => {});
+      // 아직 다 못 받았어도 여기까지는 쓸 수 있게 공개한다
+      allFiles = sanitize(dedupe(collected));
+      folderMap = fmap;
+      publish();
+    } else {
+      await idb.del('catalog', SCAN_KEY).catch(() => {});
+    }
+  };
+
   await api.listAllFilesUnder(rootId, {
     keep: keepFile,
+    stack,
+    onCheckpoint: checkpoint,
     onFolder: (f) => { fmap[f.id] = { name: f.name, parentId: f.parentId }; },
     onBatch: (batch) => {
       collected.push(...batch);
@@ -128,14 +169,23 @@ async function fullScan(onProgress) {
       emit(EVENTS.CATALOG_PROGRESS, { count: collected.length });
     },
   });
-  allFiles = sanitize(collected);
+
+  allFiles = sanitize(dedupe(collected));
   folderMap = fmap;
   fetchedAt = Date.now();
   // 전체를 훑었으니 증분 커서를 지금으로 다시 잡는다
   try { kv.set(CHANGES_TOKEN, await api.fetchStartPageToken()); } catch (e) { kv.del(CHANGES_TOKEN); }
   await save();
   publish();
+  log.info('catalog', `전체 스캔 완료 — ${allFiles.length}개`);
   return { mode: 'full', total: allFiles.length };
+}
+
+/** 이어 하다 같은 폴더를 두 번 훑었을 수 있다 — id 로 한 번만 남긴다. */
+function dedupe(list) {
+  const m = new Map();
+  for (const f of list) m.set(f.id, f);
+  return Array.from(m.values());
 }
 
 /* ── 증분 ──────────────────────────────────────────────────────────── */
