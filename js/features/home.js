@@ -9,7 +9,7 @@
 import * as shell from './shell.js';
 import * as router from '../core/router.js';
 import { get } from '../core/store.js';
-import { catalog, recents, inProgress } from '../data/index.js';
+import { catalog, recents, inProgress, myAnswers, outbox } from '../data/index.js';
 import { classify } from '../data/index.js';
 
 const esc = shell.escapeHtml;
@@ -71,7 +71,7 @@ const HUBS = {
       { ico: '🕘', label: '최근 본 문서', sub: '', go: '#/lib/recent' },
       { ico: '📰', label: '뉴스 요약', sub: '시사', go: '#/lib/docs?kind=news' },
       { ico: '🔍', label: '검색', sub: '제목·경로', go: '#/lib/docs?focus=search' },
-      { ico: '🤖', label: '문서 AI', sub: '7단계', go: '', off: true },
+      { ico: '🤖', label: '문서 AI', sub: '자료에 물어보기', go: '#/lib/ai' },
     ],
   },
   work: {
@@ -81,7 +81,7 @@ const HUBS = {
       { ico: '📝', label: '백지 인출', sub: '과목 → 단원', go: '#/browse?root=recall', count: 'recall' },
       { ico: '🔁', label: '복기 퀴즈', sub: '과목 → 세트', go: '#/browse?root=quiz', count: 'quiz' },
       { ico: '▶️', label: '이어서 풀기', sub: '풀다 만 것', go: '#/work/resume' },
-      { ico: '📄', label: '내 답안', sub: '4단계', go: '', off: true },
+      { ico: '📄', label: '내 답안', sub: '쓴 것 · 보낼 것', go: '#/work/answers' },
     ],
   },
   review: {
@@ -101,6 +101,7 @@ const HUBS = {
       { ico: '🔄', label: '동기화 상태', sub: '', go: '#/settings/sync' },
       { ico: '💾', label: '저장 공간', sub: '', go: '#/settings/storage' },
       { ico: '🎨', label: '테마 · 글자 크기', sub: '', go: '#/settings/display' },
+      { ico: '🤖', label: 'AI 키', sub: '문서 AI 답변용', go: '#/settings/ai' },
       { ico: '📋', label: '기록', sub: '진단 로그', go: '#/settings/log' },
     ],
   },
@@ -191,4 +192,30 @@ function onListClick(e) {
   if (go) { router.go(go.dataset.go); return; }
   const doc = e.target.closest('[data-doc]');
   if (doc) router.go('#/doc/' + encodeURIComponent(doc.dataset.doc));
+}
+
+/** 내 답안 — 이 기기에 쓴 것과, 아직 PC 로 못 보낸 것. */
+export async function renderAnswers() {
+  const rows = await myAnswers(50);
+  const pend = await outbox.pending();
+  const el = document.createElement('div');
+  el.innerHTML = `
+    <div class="hub-head"><h2>📄 내 답안</h2>
+      <p>이 기기에서 푼 학습지입니다. 답은 기기에 남고 PC 로도 넘어갑니다.</p></div>
+    <div class="rows">
+      <div class="set-row"><span class="k">푼 학습지</span><span class="v">${rows.length}편</span></div>
+      <div class="set-row"><span class="k">아직 못 보낸 것</span>
+        <span class="v ${pend.length ? 'warn' : 'good'}">${pend.length}건</span></div>
+    </div>
+    ${rows.length ? `<div class="doc-list">${rows.map(r => `
+      <button class="doc-row pressable" data-doc="${esc(r.id)}">
+        <span class="doc-name">${esc((r.name || '').replace(/\.html?$/i, ''))}</span>
+        <span class="doc-meta">
+          <span class="kind">${r.count || 0}칸</span>
+          <span class="where">${esc(r.path || '')}</span>
+        </span>
+      </button>`).join('')}</div>`
+      : `<div class="empty">아직 푼 학습지가 없습니다.<br>학습지를 열어 답을 써 보세요.</div>`}`;
+  el.addEventListener('click', onListClick);
+  shell.render({ title: '내 답안', back: true, node: el });
 }

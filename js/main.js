@@ -18,6 +18,7 @@ import * as viewer from './features/viewer/viewer.js';
 import * as update from './features/update.js';
 import * as reviewUi from './features/review/review.js';
 import * as mcqUi from './features/mcq/mcq.js';
+import * as aiUi from './features/ai/ai.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -40,6 +41,7 @@ function routes() {
 
   router.route('#/lib/recent', () => home.renderRecent());
   router.route('#/work/resume', () => home.renderResume());
+  router.route('#/work/answers', () => home.renderAnswers());
 
   // #/lib/docs?root=archive&kind=recall — 이름을 알 때 쓰는 평면 목록
   router.route('#/lib/docs', () => list.renderList(router.query()));
@@ -49,11 +51,13 @@ function routes() {
   router.route('#/settings/sync', () => settings.renderSync());
   router.route('#/settings/storage', () => settings.renderStorage());
   router.route('#/settings/display', () => settings.renderDisplay());
+  router.route('#/settings/ai', () => settings.renderAi());
   router.route('#/settings/log', () => settings.renderLog());
 
   router.route('#/review/today', () => reviewUi.renderToday());
   router.route('#/review/mcq', () => mcqUi.renderSets());
   router.route('#/review/wrong', () => mcqUi.renderWrong());
+  router.route('#/lib/ai', () => aiUi.renderAi());
 
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
 

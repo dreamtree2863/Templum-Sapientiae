@@ -8,7 +8,7 @@
 import * as shell from '../shell.js';
 import * as router from '../../core/router.js';
 import { get } from '../../core/store.js';
-import { auth, catalog, classify, log, outbox, uplink, refresh, storageInfo } from '../../data/index.js';
+import { auth, catalog, classify, log, outbox, uplink, search, refresh, storageInfo } from '../../data/index.js';
 import { applyThemeAll, applyScaleAll } from '../viewer/viewer.js';
 import { checkUpdate, runningVersion } from '../update.js';
 
@@ -233,6 +233,48 @@ export function renderDisplay() {
 
 function mark(el, sel, on) {
   el.querySelectorAll(sel).forEach(b => b.classList.toggle('on', b === on));
+}
+
+/* ── AI 키 ────────────────────────────────────────────────────────
+ *  ‼ 키는 이 기기에만 둔다. 어디로도 보내지 않고, Google 에 직접 물을 때만 쓴다.
+ *    키가 없어도 '문서 AI' 의 찾기는 그대로 된다 — 막지 않는다.
+ */
+export function renderAi() {
+  const el = document.createElement('div');
+  el.innerHTML = `
+    <div class="set-group"><h3>Gemini 키</h3>
+      <input type="password" id="key" class="set-input" placeholder="AI…"
+             autocomplete="off" value="${search.hasKey() ? '••••••••••••' : ''}">
+    </div>
+    <div class="set-group"><h3>모델</h3>
+      <input type="text" id="model" class="set-input" placeholder="gemini-2.5-flash"
+             autocomplete="off" value="${esc(search.getModel())}">
+    </div>
+    <div class="set-actions">
+      <button class="more-btn pressable" data-act="save">저장</button>
+      <button class="more-btn pressable" data-act="clear">키 지우기</button>
+    </div>
+    <p class="set-note">키는 이 기기에만 저장되며 다른 곳으로 보내지 않습니다.
+      키가 없어도 문서 AI 의 <b>찾기</b>는 그대로 됩니다 — 관련 문서를 골라 주고
+      근거 단락까지 추려 줍니다. AI 답변만 키가 필요합니다.</p>`;
+
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'clear') {
+      search.setKey('');
+      shell.toast('키를 지웠습니다');
+      router.go('#/settings/ai', { replace: true });
+      return;
+    }
+    const k = el.querySelector('#key').value.trim();
+    if (k && !/^[•]+$/.test(k)) search.setKey(k);
+    const m = el.querySelector('#model').value.trim();
+    search.setModel(m);
+    shell.toast('저장했습니다', 'ok');
+  });
+
+  shell.render({ title: 'AI 키', back: true, node: el });
 }
 
 /* ── 기록 ─────────────────────────────────────────────────────────── */

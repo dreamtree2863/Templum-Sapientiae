@@ -22,11 +22,12 @@ import * as driveFiles from './drive-files.js';
 import * as uplink from './uplink.js';
 import * as review from './review.js';
 import * as mcq from './mcq.js';
+import * as search from './search.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, log };
+export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, search, log };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {
@@ -106,6 +107,17 @@ async function doCapture(file, prefix) {
   if (was && was.sig === sig) { lastSig.set(file.id, sig); return null; }
   lastSig.set(file.id, sig);                     // 먼저 새겨 둔다 — 뒤따라온 호출이 멈추도록
   const id = await outbox.enqueue(answers.event(file, prefix, values));
-  await idb.put('answerSig', file.id, { sig, at: Date.now() }).catch(() => {});
+  // 이름·경로도 함께 남긴다 — '내 답안' 화면이 목록을 그리려면 필요하다
+  await idb.put('answerSig', file.id, {
+    sig, at: Date.now(), id: file.id, name: file.name, path: file.path,
+    count: Object.keys(values).length,
+  }).catch(() => {});
   return id;
+}
+
+/** 이 기기에 답을 써 둔 학습지들 — '내 답안' 화면. */
+export async function myAnswers(n = 50) {
+  const rows = await idb.all('answerSig').catch(() => []);
+  return (rows || []).filter(r => r && r.id)
+    .sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, n);
 }

@@ -265,3 +265,26 @@
   :root:not([data-theme="light"]) .mcq-gcell.ok { background: #1e2e24; color: #8fd0a8; border-color: #31503d; }
   :root:not([data-theme="light"]) .mcq-gcell.bad { background: #331f1d; color: #e59a92; border-color: #57312c; }
 }
+
+/* ── 문서 AI ─────────────────────────────────────────────────────── */
+.ai-answer {
+  padding: 16px; margin-bottom: 14px;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
+  box-shadow: var(--shadow); font-size: 15px; line-height: 1.75; color: var(--ink);
+}
+.ai-answer p { margin: 0 0 10px; }
+.ai-answer p:last-child { margin-bottom: 0; }
+.ai-context {
+  max-height: 40vh; overflow: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px; margin: 0 0 14px;
+  background: var(--surface-2); border: 1px solid var(--rule); border-radius: 10px;
+  font-size: 12.5px; line-height: 1.6; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-word;
+}
+.set-input {
+  width: 100%; min-height: var(--tap); padding: 10px 14px;
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--surface); color: var(--ink); font-size: 15px;
+  -webkit-appearance: none; appearance: none;
+}
+.set-input:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
