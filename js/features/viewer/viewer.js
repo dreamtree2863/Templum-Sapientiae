@@ -16,7 +16,7 @@ import * as log from '../../core/log.js';
 import { catalog, docContent, docRules, markOpened, captureAnswers } from '../../data/index.js';
 import { inject, injectMathLive, applyTheme, applyScale } from './inject.js';
 import * as bridge from './frame-bridge.js';
-import { mountToolbar, setPlayState } from './toolbar.js';
+import { mountToolbar, setPlayState, setAnswerCount } from './toolbar.js';
 import * as tts from '../tts/player.js';
 
 let cur = null;          // {file, frame, blobUrl, unlisten, plan, prefix, scrollY}
@@ -78,6 +78,8 @@ export async function open(fileId) {
       if (!cur) return;
       cur.answers = m.values || {};
       if (m.prefix) cur.prefix = m.prefix;
+      const n = Object.keys(cur.answers).length;
+      setAnswerCount(cur.bar, n, cur.prefix ? '아직 쓴 답이 없습니다' : '저장 이름표를 못 찾았습니다');
       harvest(cur);
     },
   });
@@ -109,11 +111,11 @@ export async function open(fileId) {
     document.addEventListener('visibilitychange', cur.onHide);
   }
 
-  const bar = mountToolbar(wrap, {
+  cur.bar = mountToolbar(wrap, {
     file, plan,
     onTheme: (t) => { applyThemeAll(t); },
     onScale: (s) => { applyScaleAll(s); },
-    onPlay: () => onPlay(frame, file, bar),
+    onPlay: () => onPlay(frame, file, cur.bar),
   });
 
   log.info('viewer', `${file.name} (${Math.round(doc.size / 1024)}KB)`
@@ -126,9 +128,46 @@ function hideVeil(veil) { veil?.classList.add('gone'); }
  *  ‼ 맥락을 **인자로** 받는다 — close() 는 cur 를 비운 뒤에 부르기 때문에
  *    전역을 보게 두면 정작 떠날 때 아무것도 못 거둔다. */
 function harvest(c = cur) {
-  if (!c || !c.plan?.worksheet || !c.prefix) return;
-  captureAnswers(c.file, c.prefix, c.answers)
+  if (!c) return;
+  /* ‼ 조용히 건너뛰지 않는다. "보낼 게 없다"가 왜인지 기록에 남겨야
+     설정 → 기록만 열어 보면 원인이 드러난다(추측으로 헤매지 않게). */
+  if (!c.plan?.worksheet) { once(c, 'no-worksheet', '학습지로 보지 않음 — 답을 거두지 않습니다'); return; }
+  if (!c.prefix) { once(c, 'no-prefix', '저장 이름표(PREFIX)를 못 찾아 답을 거두지 못합니다'); return; }
+  /* 값의 출처는 셋 — 이 순서로 고른다.
+     ① 문서가 방금 보내 준 사본  ② 프레임 저장소를 지금 직접 읽기  ③ 앱 저장소(폴백)
+     ②가 필요한 이유: 떠나는 순간에는 메시지를 기다릴 새가 없다(프레임이 곧 사라진다).
+     ③이 필요한 이유: 문서가 다른 출처면 ②가 막힌다. 셋 다 두어야 어디서든 거둬진다. */
+  const values = pick(c);
+  captureAnswers(c.file, c.prefix, values)
     .catch(e => log.warn('viewer', '답안 수집 실패', e));
+}
+
+/** 지금 이 문서의 답 — 있는 데서 가져온다(위 주석의 ①②③). */
+function pick(c) {
+  if (c.answers && Object.keys(c.answers).length) return c.answers;
+  const head = c.prefix + '-';
+  try {
+    const ls = c.frame?.contentWindow?.localStorage;
+    if (ls) {
+      const out = {};
+      for (let i = 0; i < ls.length; i++) {
+        const k = ls.key(i);
+        if (!k || !k.startsWith(head)) continue;
+        const v = ls.getItem(k);
+        if (v) out[k.slice(head.length)] = v;
+      }
+      if (Object.keys(out).length) return out;
+    }
+  } catch (e) { /* 다른 출처 — ③ 으로 간다 */ }
+  return null;                        // captureAnswers 가 앱 저장소를 본다
+}
+
+/** 같은 사연을 문서당 한 번만 적는다 — 기록이 같은 줄로 덮이지 않게. */
+function once(c, tag, msg) {
+  c._said = c._said || {};
+  if (c._said[tag]) return;
+  c._said[tag] = 1;
+  log.warn('viewer', `${msg} (${c.file?.name || ''})`);
 }
 
 /* 낭독 — 문서를 보며 따라 읽는다. 처음 누를 때만 붙이고, 그 뒤엔 재생/일시정지. */

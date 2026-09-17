@@ -87,7 +87,8 @@ const AGENT = `(function () {
     if (d.t === 'collect') sendAnswers();
   });
 
-  send({ t: 'agent-ready' });
+  send({ t: 'agent-ready', prefix: PREFIX });
+  sendAnswers();          // 열자마자 한 번 — 앞서 써 둔 답이 있으면 바로 보인다
 })();`;
 
 export function installAgent(doc, { prefix } = {}) {

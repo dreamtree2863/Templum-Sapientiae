@@ -61,3 +61,4 @@ body.reading #tabbar { display: none; }
   font-size: 11px; color: var(--ink-3); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
+.doc-note.on { color: var(--gold-dim); font-weight: 700; }

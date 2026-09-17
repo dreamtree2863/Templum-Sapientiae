@@ -20,7 +20,7 @@ export function mountToolbar(wrap, { file, plan, onTheme, onScale, onPlay }) {
     ${hasAudio ? `<button class="doc-btn play" data-act="play" aria-label="낭독">▶</button>` : ''}
     <span class="doc-bar-gap"></span>
     ${plan.graph ? `<span class="doc-note" title="작도칸이 있는 학습지입니다">✏️ 작도칸</span>` : ''}
-    ${plan.worksheet ? `<span class="doc-note">답은 이 기기에 저장됩니다</span>` : ''}`;
+    ${plan.worksheet ? `<span class="doc-note" id="doc-answers">답은 이 기기에 저장됩니다</span>` : ''}`;
   wrap.appendChild(bar);
 
   bar.addEventListener('click', (e) => {
@@ -51,6 +51,15 @@ export function mountToolbar(wrap, { file, plan, onTheme, onScale, onPlay }) {
 
 function themeIcon(t) {
   return t === 'dark' ? '🌙' : t === 'light' ? '☀️' : '🌗';
+}
+
+/** 답이 몇 칸 담겼는지 — 보이면 "저장이 되는 중인가"를 묻지 않아도 된다.
+ *  ‼ 이 한 줄이 진단이기도 하다. 답을 썼는데 0칸이면 문서가 답을 못 넘기고 있다는 뜻. */
+export function setAnswerCount(bar, n, why) {
+  const el = bar?.querySelector('#doc-answers');
+  if (!el) return;
+  el.textContent = n > 0 ? `답 ${n}칸 담김` : (why || '답은 이 기기에 저장됩니다');
+  el.classList.toggle('on', n > 0);
 }
 
 /** 낭독 단추의 얼굴 — 지금 무슨 일이 일어나는지 손가락에 바로 알려 준다. */
