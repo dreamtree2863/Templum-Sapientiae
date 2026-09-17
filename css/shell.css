@@ -176,3 +176,14 @@
   border-radius: 50%; animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 진행 표시 — 화면을 옮겨도 살아 있어야 하므로 body 에 붙는다 */
+.banner.progress {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + var(--safe-b) + 10px);
+  z-index: 60; max-width: calc(100vw - 24px);
+  padding: 9px 16px; border-radius: 20px;
+  background: var(--navy); color: var(--cream);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0,0,0,.28);
+}

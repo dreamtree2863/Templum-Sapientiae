@@ -21,6 +21,14 @@ const ROOT_NAME = 'Templum';
  *   그 상태를 물려받으면 목록은 6월 것인데 Drive 는 "변경 없음"만 답한다
  *   — 새로고침을 아무리 눌러도 그 뒤 만들어진 학습지 736편이 영영 안 보인다.
  *   키를 갈아 옛 커서를 한 번 버리고 전체 스캔으로 되돌린다. */
+/* ‼ 목록이 **무엇을 담는지**가 바뀌면 이 번호를 올린다.
+ *   그러면 앱이 스스로 한 번 전체를 다시 훑는다.
+ *   왜 필요한가 — 폰에 남아 있는 목록은 옛 규칙으로 만들어진 것이다.
+ *   예를 들어 `_state/*.json`(복습 카드·객관식 은행)은 담기지 않던 시절의 목록이라,
+ *   코드를 고쳐도 목록을 다시 받기 전까지는 그 파일을 영영 못 찾는다.
+ *   사용자가 "전체 다시 훑기"를 눌러야만 고쳐지는 상태를 남기지 않는다. */
+const CATALOG_EPOCH = 2;
+
 const CHANGES_TOKEN = 'changesToken.v2';
 const DEAD_TOKEN = 'changesToken.v1';          // 옛 앱이 남긴 커서 — 믿지 않는다
 const OLD_LS_CACHE = 'templum.docList.v9';     // 옛 localStorage 캐시 — 1회 이전 후 삭제
@@ -31,6 +39,7 @@ let folderMap = {};          // folderId → {name, parentId}
 let fetchedAt = 0;
 let busy = false;
 let itemById = new Map();   // id → 오디오·종류가 붙은 항목(build 가 채운다)
+let staleEpoch = false;     // 옛 규칙으로 만든 목록 — 한 번 전체를 다시 받아야 한다
 
 export const files = () => allFiles;
 export const templumId = () => rootId;
@@ -55,7 +64,9 @@ async function save() {
   try {
     await idb.put('catalog', 'files', allFiles);
     await idb.put('catalog', 'folderMap', folderMap);
-    await idb.put('catalog', 'meta', { rootId, fetchedAt, total: allFiles.length });
+    await idb.put('catalog', 'meta', {
+      rootId, fetchedAt, total: allFiles.length, epoch: CATALOG_EPOCH,
+    });
   } catch (e) { log.warn('catalog', '캐시 저장 실패', e); }
 }
 
@@ -82,6 +93,10 @@ export async function load() {
     const meta = (await idb.get('catalog', 'meta')) || {};
     rootId = meta.rootId || null;
     fetchedAt = meta.fetchedAt || 0;
+    if (allFiles.length && (Number(meta.epoch) || 0) !== CATALOG_EPOCH) {
+      staleEpoch = true;
+      log.info('catalog', '옛 규칙으로 만든 목록 — 다음 새로고침에 전체를 다시 받습니다');
+    }
   }
   publish();
   return allFiles.length;
@@ -185,6 +200,7 @@ async function fullScan(onProgress) {
   fetchedAt = Date.now();
   // 전체를 훑었으니 증분 커서를 지금으로 다시 잡는다
   try { kv.set(CHANGES_TOKEN, await api.fetchStartPageToken()); } catch (e) { kv.del(CHANGES_TOKEN); }
+  staleEpoch = false;
   await save();
   publish();
   log.info('catalog', `전체 스캔 완료 — ${allFiles.length}개`);
@@ -268,7 +284,9 @@ export async function refresh({ force = false, onProgress } = {}) {
   try {
     if (!rootId) rootId = await api.findFolderByName(ROOT_NAME, null);
 
-    const cursor = force ? null : kv.get(CHANGES_TOKEN);
+    // 옛 규칙으로 만든 목록이면 증분으로 고칠 수 없다 — 한 번은 전체를 받아야 한다
+    const cursor = (force || staleEpoch) ? null : kv.get(CHANGES_TOKEN);
+    if (staleEpoch) log.info('catalog', '목록 형식이 바뀌어 전체를 다시 받습니다');
     if (cursor && allFiles.length) {
       try {
         const { entries, newToken } = await api.fetchChanges(cursor);

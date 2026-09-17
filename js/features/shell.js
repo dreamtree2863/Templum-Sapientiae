@@ -115,6 +115,32 @@ export function banner(text, { action, onAction } = {}) {
   $main.prepend(el);
 }
 
+/** 오래 걸리는 일의 진행 표시 — 하나만 뜨고 글자만 바뀐다.
+ *  ‼ 목록을 9천 개 받는 동안 아무 말도 없으면 사용자는 "또 안 되는구나" 한다.
+ *    숫자가 오르는 것이 보여야 기다린다. 화면을 옮겨도 살아 있어야 해서 셸에 붙인다. */
+let $progress = null;
+
+export function progress(text) {
+  if (!$progress) {
+    $progress = document.createElement('div');
+    $progress.className = 'banner progress';
+    document.body.appendChild($progress);
+  }
+  $progress.textContent = text;
+}
+
+export function progressDone(text) {
+  if (!$progress) return;
+  if (text) {
+    $progress.textContent = text;
+    const el = $progress;
+    setTimeout(() => el.remove(), 2500);
+  } else {
+    $progress.remove();
+  }
+  $progress = null;
+}
+
 export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

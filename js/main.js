@@ -97,9 +97,15 @@ async function boot() {
   window.addEventListener('online', () => store.patch('ui', { online: true }));
   window.addEventListener('offline', () => store.patch('ui', { online: false }));
 
+  /* 목록을 받는 동안 숫자가 오르는 것을 보여 준다.
+     ‼ 9천 개를 받는 몇 분 동안 아무 말이 없으면 "또 안 되는구나" 하게 된다. */
   on(EVENTS.CATALOG_PROGRESS, ({ count }) => {
+    shell.progress(`자료 목록을 받는 중… ${count.toLocaleString()}개`);
     const el = document.querySelector('#count');
     if (el) el.textContent = `받는 중… ${count.toLocaleString()}개`;
+  });
+  on(EVENTS.CATALOG_CHANGED, ({ total }) => {
+    shell.progressDone(total ? `자료 ${total.toLocaleString()}개를 받았습니다` : '');
   });
 
   router.start();                       // 캐시가 없어도 화면은 먼저 띄운다
