@@ -77,8 +77,9 @@ export async function open(fileId) {
     answers: (m) => {
       if (!cur) return;
       cur.answers = m.values || {};
+      cur.graphs = m.graphs || {};
       if (m.prefix) cur.prefix = m.prefix;
-      const n = Object.keys(cur.answers).length;
+      const n = Object.keys(cur.answers).length + Object.keys(cur.graphs).length;
       setAnswerCount(cur.bar, n, cur.prefix ? '아직 쓴 답이 없습니다' : '저장 이름표를 못 찾았습니다');
       harvest(cur);
     },
@@ -137,29 +138,33 @@ function harvest(c = cur) {
      ① 문서가 방금 보내 준 사본  ② 프레임 저장소를 지금 직접 읽기  ③ 앱 저장소(폴백)
      ②가 필요한 이유: 떠나는 순간에는 메시지를 기다릴 새가 없다(프레임이 곧 사라진다).
      ③이 필요한 이유: 문서가 다른 출처면 ②가 막힌다. 셋 다 두어야 어디서든 거둬진다. */
-  const values = pick(c);
-  captureAnswers(c.file, c.prefix, values)
+  const got = pick(c);
+  captureAnswers(c.file, c.prefix, got.values, got.graphs)
     .catch(e => log.warn('viewer', '답안 수집 실패', e));
 }
 
 /** 지금 이 문서의 답 — 있는 데서 가져온다(위 주석의 ①②③). */
 function pick(c) {
-  if (c.answers && Object.keys(c.answers).length) return c.answers;
+  const has = (o) => o && Object.keys(o).length;
+  if (has(c.answers) || has(c.graphs)) return { values: c.answers || {}, graphs: c.graphs || {} };
   const head = c.prefix + '-';
+  const ghead = 'ge-' + c.prefix + '-';
   try {
     const ls = c.frame?.contentWindow?.localStorage;
     if (ls) {
-      const out = {};
+      const values = {}, graphs = {};
       for (let i = 0; i < ls.length; i++) {
         const k = ls.key(i);
-        if (!k || !k.startsWith(head)) continue;
+        if (!k) continue;
         const v = ls.getItem(k);
-        if (v) out[k.slice(head.length)] = v;
+        if (!v) continue;
+        if (k.startsWith(ghead)) graphs[k.slice(ghead.length)] = v;
+        else if (k.startsWith(head)) values[k.slice(head.length)] = v;
       }
-      if (Object.keys(out).length) return out;
+      if (has(values) || has(graphs)) return { values, graphs };
     }
   } catch (e) { /* 다른 출처 — ③ 으로 간다 */ }
-  return null;                        // captureAnswers 가 앱 저장소를 본다
+  return { values: null, graphs: null };   // captureAnswers 가 앱 저장소를 본다
 }
 
 /** 같은 사연을 문서당 한 번만 적는다 — 기록이 같은 줄로 덮이지 않게. */

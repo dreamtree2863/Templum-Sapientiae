@@ -8,12 +8,14 @@
 import * as shell from '../shell.js';
 import * as router from '../../core/router.js';
 import { get } from '../../core/store.js';
+import * as kv from '../../core/kv.js';
 import { auth, catalog, classify, log, outbox, uplink, search, refresh, storageInfo } from '../../data/index.js';
 import { applyThemeAll, applyScaleAll } from '../viewer/viewer.js';
 import { checkUpdate, runningVersion } from '../update.js';
 
 const esc = shell.escapeHtml;
 const SCALES = [0.9, 1, 1.15, 1.3];
+const LAST_SENT = 'sync.lastSent';   // 마지막으로 PC 에 보낸 시각
 
 /* ── 동기화 상태 ──────────────────────────────────────────────────── */
 export async function renderSync() {
@@ -75,8 +77,14 @@ async function onSend(el, b) {
     } else if (r.skipped) {
       shell.toast({ offline: '오프라인입니다', 'signed-out': '로그인이 필요합니다',
                     busy: '보내는 중입니다' }[r.skipped] || r.skipped);
+    } else if (r.sent) {
+      shell.toast(`${r.sent}건 보냈습니다`, 'ok');
+      kv.set(LAST_SENT, Date.now());
     } else {
-      shell.toast(r.sent ? `${r.sent}건 보냈습니다` : '보낼 것이 없습니다', 'ok');
+      /* ‼ "보낼 것이 없습니다"는 실패처럼 읽힌다 — 실제로 그렇게 오해했다.
+         이미 보낸 것이면 그렇다고 말한다(자동 발신이 먼저 나가는 일이 흔하다). */
+      const at = kv.get(LAST_SENT);
+      shell.toast(at ? `이미 다 보냈습니다 · ${when(at)}` : '보낼 것이 없습니다');
     }
   } catch (e) {
     shell.toast(e.message || '보내지 못했습니다', 'error');
@@ -134,6 +142,7 @@ async function syncFacts() {
     ['복기 퀴즈', (counts.quiz || 0) + '편', counts.quiz ? '' : 'warn'],
     ['낭독 음성', audio.toLocaleString() + '개', ''],
     ['보낼 기록', (get('outbox').pending || 0) + '건', ''],
+    ['마지막 전송', kv.get(LAST_SENT) ? when(kv.get(LAST_SENT)) : '아직 없음', ''],
     ['앱 버전', ver ? ver.replace('templum-shell-', '') : '확인 불가', ver ? '' : 'warn'],
   ];
 }

@@ -13,24 +13,41 @@
  */
 import * as log from '../core/log.js';
 
-/** 이 문서의 답을 모두 읽는다. 빈 칸은 담지 않는다. */
+/**
+ * 이 문서의 답을 모두 읽는다. 빈 칸은 담지 않는다.
+ *
+ * ‼ 학습지는 두 자리에 나눠 저장한다:
+ *     <PREFIX>-<키>      글 답안·표 빈칸 (문서 자체 스크립트)
+ *     ge-<PREFIX>-<키>   작도칸 그래프 (graph_editor) — 모델 JSON
+ *   앞의 것만 보면 작도한 그래프가 통째로 빠진다.
+ */
 export function collect(prefix) {
-  const out = {};
-  if (!prefix) return out;
+  const values = {};
+  const graphs = {};
+  if (!prefix) return { values, graphs };
   const head = prefix + '-';
+  const ghead = 'ge-' + prefix + '-';
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (!k || !k.startsWith(head)) continue;
+      if (!k) continue;
       const v = localStorage.getItem(k);
-      if (v) out[k.slice(head.length)] = v;
+      if (!v) continue;
+      if (k.startsWith(ghead)) graphs[k.slice(ghead.length)] = v;
+      else if (k.startsWith(head)) values[k.slice(head.length)] = v;
     }
   } catch (e) { log.warn('answers', '답안을 읽지 못했습니다', e); }
-  return out;
+  return { values, graphs };
 }
 
 /** 내용이 바뀌었는지 싸게 가리는 지문. 같으면 보내지 않는다. */
-export function signature(values) {
+export function signature(values, graphs) {
+  const merged = { ...(values || {}) };
+  for (const [k, v] of Object.entries(graphs || {})) merged['ge:' + k] = v;
+  return sigOf(merged);
+}
+
+function sigOf(values) {
   const keys = Object.keys(values).sort();
   let h = 0x811c9dc5;
   const feed = (s) => {
@@ -45,7 +62,7 @@ export function signature(values) {
 }
 
 /** PC 로 보낼 사건 하나. 상태가 아니라 **사건**이라 두 번 들어와도 같은 결과다. */
-export function event(file, prefix, values) {
+export function event(file, prefix, values, graphs) {
   return {
     kind: 'answers',
     docId: file.id,
@@ -53,7 +70,8 @@ export function event(file, prefix, values) {
     path: file.path,
     prefix,
     at: Date.now(),
-    count: Object.keys(values).length,
-    values,
+    count: Object.keys(values || {}).length + Object.keys(graphs || {}).length,
+    values: values || {},
+    graphs: graphs || {},      // 작도칸 그래프(모델 JSON) — 없으면 빈 객체
   };
 }

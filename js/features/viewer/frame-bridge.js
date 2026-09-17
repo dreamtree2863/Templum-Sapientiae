@@ -49,22 +49,33 @@ const AGENT = `(function () {
      캐는 일은 doc-rules.prefixOf 한 곳에서만 한다. */
   var PREFIX = __PREFIX__;
 
+  /* 학습지는 답을 두 자리에 나눠 저장한다 — 둘 다 거둬야 한다.
+       <PREFIX>-<키>       글 답안·표 빈칸 (문서 자체 스크립트)
+       ge-<PREFIX>-<키>    작도칸 그래프 (graph_editor) — 그림이 아니라 **모델 JSON** 이라
+                           가볍고, 받는 쪽에서 다시 그릴 수 있다.
+     ‼ 앞의 것만 거두면 작도한 그래프가 PC 로 넘어가지 않는다. */
   function collect() {
-    var out = {};
+    var out = { values: {}, graphs: {} };
     if (!PREFIX) return out;
     var head = PREFIX + '-';
+    var ghead = 'ge-' + PREFIX + '-';
     try {
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
-        if (!k || k.indexOf(head) !== 0) continue;
+        if (!k) continue;
         var v = localStorage.getItem(k);
-        if (v) out[k.slice(head.length)] = v;
+        if (!v) continue;
+        if (k.indexOf(ghead) === 0) out.graphs[k.slice(ghead.length)] = v;
+        else if (k.indexOf(head) === 0) out.values[k.slice(head.length)] = v;
       }
     } catch (e) {}
     return out;
   }
 
-  function sendAnswers() { send({ t: 'answers', prefix: PREFIX, values: collect() }); }
+  function sendAnswers() {
+    var c = collect();
+    send({ t: 'answers', prefix: PREFIX, values: c.values, graphs: c.graphs });
+  }
 
   // 답이 바뀌면 그 자리에서 값까지 함께 보낸다 — 부모가 늘 최신 사본을 들고 있게
   var dirty = null;

@@ -89,30 +89,35 @@ export async function storageInfo() {
 const capturing = new Map();      // docId → 진행 중인 약속(줄 세우기)
 const lastSig = new Map();        // docId → 마지막으로 보낸 지문
 
-export function captureAnswers(file, prefix, given) {
+export function captureAnswers(file, prefix, given, givenGraphs) {
   if (!file || !prefix) return Promise.resolve(null);
   const prev = capturing.get(file.id) || Promise.resolve(null);
-  const next = prev.catch(() => null).then(() => doCapture(file, prefix, given));
+  const next = prev.catch(() => null).then(() => doCapture(file, prefix, given, givenGraphs));
   capturing.set(file.id, next);
   next.finally(() => { if (capturing.get(file.id) === next) capturing.delete(file.id); });
   return next;
 }
 
-async function doCapture(file, prefix, given) {
+async function doCapture(file, prefix, given, givenGraphs) {
   /* ‼ 문서가 보내 준 값을 먼저 쓴다. 우리 쪽 localStorage 를 뒤지는 것은 폴백이다 —
      blob: 문서가 다른 출처로 잡히는 브라우저에서는 그쪽이 비어 있다. */
-  const values = (given && Object.keys(given).length) ? given : answers.collect(prefix);
-  if (!Object.keys(values).length) return null;
-  const sig = answers.signature(values);
+  const some = (o) => o && Object.keys(o).length;
+  let values = given || {};
+  let graphs = givenGraphs || {};
+  if (!some(values) && !some(graphs)) {
+    const got = answers.collect(prefix);
+    values = got.values; graphs = got.graphs;
+  }
+  if (!some(values) && !some(graphs)) return null;
+  const sig = answers.signature(values, graphs);
   if (lastSig.get(file.id) === sig) return null;
   const was = await idb.get('answerSig', file.id).catch(() => null);
   if (was && was.sig === sig) { lastSig.set(file.id, sig); return null; }
   lastSig.set(file.id, sig);                     // 먼저 새겨 둔다 — 뒤따라온 호출이 멈추도록
-  const id = await outbox.enqueue(answers.event(file, prefix, values));
+  const id = await outbox.enqueue(answers.event(file, prefix, values, graphs));
   // 이름·경로도 함께 남긴다 — '내 답안' 화면이 목록을 그리려면 필요하다
   await idb.put('answerSig', file.id, {
     sig, at: Date.now(), id: file.id, name: file.name, path: file.path,
-    count: Object.keys(values).length,
   }).catch(() => {});
   return id;
 }
