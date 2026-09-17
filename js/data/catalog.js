@@ -27,7 +27,7 @@ const ROOT_NAME = 'Templum';
  *   예를 들어 `_state/*.json`(복습 카드·객관식 은행)은 담기지 않던 시절의 목록이라,
  *   코드를 고쳐도 목록을 다시 받기 전까지는 그 파일을 영영 못 찾는다.
  *   사용자가 "전체 다시 훑기"를 눌러야만 고쳐지는 상태를 남기지 않는다. */
-const CATALOG_EPOCH = 2;
+const CATALOG_EPOCH = 3;   // 3: 증분이 `_state/*.json` 을 버리던 것을 고침 → 한 번 다시 훑는다
 
 const CHANGES_TOKEN = 'changesToken.v2';
 const DEAD_TOKEN = 'changesToken.v1';          // 옛 앱이 남긴 커서 — 믿지 않는다
@@ -254,9 +254,13 @@ async function applyChanges(entries) {
       if (under) return false;                 // Templum 안 폴더 생성/이름변경/이동 → 전체 스캔
       continue;
     }
-    if (!keepFile(f.name)) { byId.delete(id); continue; }
+    /* ‼ 경로를 **먼저** 알아낸 뒤에 담을지 정한다.
+       keepFile 은 `_state/` 아래 .json 만 받아들이는데, 경로를 모른 채 부르면
+       그 판정이 늘 거짓이 된다 → 새로 생긴 검색 색인·복습 카드가 증분에서
+       조용히 버려져 "PC 가 아직 안 내보냈다"로 보인다(실제로 물렸다). */
     const path = await resolvePath(f.parents?.[0] || null);
     if (path === null) { byId.delete(id); continue; }   // Templum 밖으로 나감
+    if (!keepFile(f.name, path)) { byId.delete(id); continue; }
     byId.set(id, {
       id, name: f.name,
       mtime: Date.parse(f.modifiedTime) || 0,

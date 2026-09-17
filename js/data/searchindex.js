@@ -48,7 +48,18 @@ async function fetchJson(file) {
 /** Drive 에서 색인을 받아 IDB 에 둔다. 반환 = 문서 수(없으면 null). */
 export async function pull({ onProgress } = {}) {
   const f = fileAt(INDEX_PATH);
-  if (!f) return null;                       // PC 가 아직 안 내보냈다
+  if (!f) {
+    /* 두 가지 경우가 있다 — 구분해서 알려 준다.
+       ① PC 가 아직 안 내보냈다  ② 내보냈는데 폰 목록이 낡아 그 파일을 모른다
+       ②가 실제로 물렸던 쪽이다(증분이 `_state/*.json` 을 버렸다). */
+    const stale = !catalog.files().some(x => (x.path || '').startsWith('_state'));
+    const e = new Error(stale
+      ? '목록이 낡아 색인 파일을 모릅니다 — 설정에서 전체 다시 훑기를 눌러 주세요'
+      : 'PC 가 아직 색인을 내보내지 않았습니다');
+    e.stale = stale;
+    if (stale) throw e;
+    return null;
+  }
   onProgress?.('검색 색인을 받는 중…');
   const d = await fetchJson(f);
   await idb.put('state', 'searchIndex', { ...d, fetchedAt: Date.now() });
