@@ -5,8 +5,12 @@
  *  그래서 작은 스크립트 하나를 문서에 심고 postMessage 로 주고받는다.
  *
  *  주고받는 것 (전부 {__templum:1, t:...} 꼴)
- *    iframe → 부모   scroll · link · typeset-done · answers-changed
- *    부모 → iframe   scroll-to
+ *    iframe → 부모   scroll · link · typeset-done · answers
+ *    부모 → iframe   scroll-to · collect
+ *
+ *  ‼ 답안은 **문서가 직접 읽어서 보낸다.** 부모가 자기 localStorage 를 뒤지면 안 된다 —
+ *    blob: 문서가 부모와 다른 출처로 잡히는 브라우저가 있고(폰에서 실제로 겪었다),
+ *    그러면 부모 쪽은 텅 비어 "보낼 게 없다"가 된다. 문서에게 물어보면 그 문제가 없다.
  */
 
 const TAG = '__templum';
@@ -39,25 +43,57 @@ const AGENT = `(function () {
     else send({ t: 'link', kind: 'doc', href: href });
   }, true);
 
-  // 답이 바뀌었다 — 4단계에서 폰→PC 로 보낼 거리가 생겼다는 뜻
+  /* 답을 저장하는 자리(PREFIX)는 **부모가 넣어 준다**.
+     주의: 이 스크립트는 템플릿 문자열이라 역슬래시가 한 겹 먹힌다. 여기서 정규식으로
+     다시 캐려다 백슬래시-s 가 조용히 s 가 되어 아무것도 못 찾았다(실제로 물렸다).
+     캐는 일은 doc-rules.prefixOf 한 곳에서만 한다. */
+  var PREFIX = __PREFIX__;
+
+  function collect() {
+    var out = {};
+    if (!PREFIX) return out;
+    var head = PREFIX + '-';
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(head) !== 0) continue;
+        var v = localStorage.getItem(k);
+        if (v) out[k.slice(head.length)] = v;
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  function sendAnswers() { send({ t: 'answers', prefix: PREFIX, values: collect() }); }
+
+  // 답이 바뀌면 그 자리에서 값까지 함께 보낸다 — 부모가 늘 최신 사본을 들고 있게
   var dirty = null;
   addEventListener('input', function () {
     if (dirty) return;
-    dirty = setTimeout(function () { dirty = null; send({ t: 'answers-changed' }); }, 1200);
+    dirty = setTimeout(function () { dirty = null; sendAnswers(); }, 1200);
+  }, true);
+  // 표 빈칸은 클릭으로 순환하므로 input 이 안 난다
+  addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains('cell')) return;
+    if (dirty) clearTimeout(dirty);
+    dirty = setTimeout(function () { dirty = null; sendAnswers(); }, 1200);
   }, true);
 
   addEventListener('message', function (e) {
     var d = e.data;
     if (!d || !d.${TAG}) return;
     if (d.t === 'scroll-to') window.scrollTo(0, d.y || 0);
+    if (d.t === 'collect') sendAnswers();
   });
 
   send({ t: 'agent-ready' });
 })();`;
 
-export function installAgent(doc) {
+export function installAgent(doc, { prefix } = {}) {
   const s = doc.createElement('script');
-  s.textContent = AGENT;
+  // 답 저장 자리는 부모가 이미 안다(doc-rules.prefixOf) — 문서에 그대로 심어 준다
+  s.textContent = AGENT.replace('__PREFIX__', JSON.stringify(prefix || null));
   (doc.body || doc.documentElement).appendChild(s);
 }
 
@@ -75,4 +111,11 @@ export function listen(frame, handlers) {
 
 export function scrollTo(frame, y) {
   try { frame.contentWindow.postMessage({ [TAG]: 1, t: 'scroll-to', y }, '*'); } catch (e) {}
+}
+
+/** 문서에게 무언가를 부탁한다(지금은 'collect' — 답안을 지금 보내 줘). */
+export function ask(frame, t, extra) {
+  try {
+    frame?.contentWindow?.postMessage({ [TAG]: 1, t, ...(extra || {}) }, '*');
+  } catch (e) { /* 프레임이 이미 사라졌을 수 있다 */ }
 }

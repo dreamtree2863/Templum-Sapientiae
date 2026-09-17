@@ -71,7 +71,15 @@ export async function open(fileId) {
       }).catch(() => {});
     },
     link: (m) => onLink(m, file),
-    'answers-changed': () => { cur.dirty = true; },     // 4단계에서 여기서 모은다
+    /* ‼ 답안은 문서가 제 손으로 읽어 보내 준다(부모가 자기 localStorage 를 뒤지지 않는다).
+       blob: 문서가 부모와 다른 출처로 잡히는 브라우저가 있어, 부모 쪽은 텅 비어
+       "보낼 게 없다"가 되던 문제를 여기서 막는다. */
+    answers: (m) => {
+      if (!cur) return;
+      cur.answers = m.values || {};
+      if (m.prefix) cur.prefix = m.prefix;
+      harvest(cur);
+    },
   });
 
   frame.addEventListener('load', () => {
@@ -79,7 +87,7 @@ export async function open(fileId) {
     if (!d) { hideVeil(veil); return; }
     try {
       inject(d, plan, { theme: ui.theme, textScale: ui.textScale });
-      bridge.installAgent(d);
+      bridge.installAgent(d, { prefix: doc.prefix });
       if (plan.mathlive) injectMathLive(d);
     } catch (e) {
       log.warn('viewer', '자산 주입 실패', e);
@@ -93,7 +101,11 @@ export async function open(fileId) {
   // ‼ 폰은 언제든 죽는다 — 닫을 때만 거두면 홈 버튼 한 번에 답이 날아간다.
   //   화면이 가려지는 순간에도 거둔다(그때가 마지막 기회일 수 있다).
   if (plan.worksheet) {
-    cur.onHide = () => { if (document.visibilityState === 'hidden') harvest(); };
+    cur.onHide = () => {
+      if (document.visibilityState !== 'hidden') return;
+      bridge.ask(frame, 'collect');          // 마지막 타이핑까지 달라고 한다
+      harvest();
+    };
     document.addEventListener('visibilitychange', cur.onHide);
   }
 
@@ -115,7 +127,8 @@ function hideVeil(veil) { veil?.classList.add('gone'); }
  *    전역을 보게 두면 정작 떠날 때 아무것도 못 거둔다. */
 function harvest(c = cur) {
   if (!c || !c.plan?.worksheet || !c.prefix) return;
-  captureAnswers(c.file, c.prefix).catch(e => log.warn('viewer', '답안 수집 실패', e));
+  captureAnswers(c.file, c.prefix, c.answers)
+    .catch(e => log.warn('viewer', '답안 수집 실패', e));
 }
 
 /* 낭독 — 문서를 보며 따라 읽는다. 처음 누를 때만 붙이고, 그 뒤엔 재생/일시정지. */

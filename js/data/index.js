@@ -89,17 +89,19 @@ export async function storageInfo() {
 const capturing = new Map();      // docId → 진행 중인 약속(줄 세우기)
 const lastSig = new Map();        // docId → 마지막으로 보낸 지문
 
-export function captureAnswers(file, prefix) {
+export function captureAnswers(file, prefix, given) {
   if (!file || !prefix) return Promise.resolve(null);
   const prev = capturing.get(file.id) || Promise.resolve(null);
-  const next = prev.catch(() => null).then(() => doCapture(file, prefix));
+  const next = prev.catch(() => null).then(() => doCapture(file, prefix, given));
   capturing.set(file.id, next);
   next.finally(() => { if (capturing.get(file.id) === next) capturing.delete(file.id); });
   return next;
 }
 
-async function doCapture(file, prefix) {
-  const values = answers.collect(prefix);
+async function doCapture(file, prefix, given) {
+  /* ‼ 문서가 보내 준 값을 먼저 쓴다. 우리 쪽 localStorage 를 뒤지는 것은 폴백이다 —
+     blob: 문서가 다른 출처로 잡히는 브라우저에서는 그쪽이 비어 있다. */
+  const values = (given && Object.keys(given).length) ? given : answers.collect(prefix);
   if (!Object.keys(values).length) return null;
   const sig = answers.signature(values);
   if (lastSig.get(file.id) === sig) return null;
