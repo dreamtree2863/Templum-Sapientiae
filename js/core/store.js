@@ -12,6 +12,7 @@ const state = {
   catalog: { files: [], groups: {}, tree: {}, fetchedAt: 0, loading: false, total: 0 },
   doc: { id: null, title: '', path: '', prefix: null },
   outbox: { pending: 0, lastPushAt: 0 },
+  search: { indexed: 0, at: 0 },        // 검색 색인 — 본문·태그까지 보는 판
   review: { due: 0, session: [] },
   ui: { route: '#/', theme: 'system', textScale: 1, online: navigator.onLine },
 };

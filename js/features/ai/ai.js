@@ -9,7 +9,7 @@
  */
 import * as shell from '../shell.js';
 import * as router from '../../core/router.js';
-import { search, markOpened, catalog } from '../../data/index.js';
+import { search, searchIndex, markOpened, catalog } from '../../data/index.js';
 
 const esc = shell.escapeHtml;
 let last = { q: '', hits: [], context: '', sources: [], answer: '' };
@@ -36,8 +36,13 @@ export function renderAi() {
 
 function intro() {
   return `<p class="set-note">받아 둔 자료에서 찾아 줍니다.
+    ${searchIndex.ready()
+      ? `본문·소제목·태그까지 봅니다 (색인 ${searchIndex.size().toLocaleString()}문서).`
+      : '지금은 <b>제목과 경로만</b> 봅니다.'}
     ${search.hasKey() ? 'AI 답변도 쓸 수 있습니다.'
-      : 'AI 답변을 쓰려면 설정에서 키를 넣으세요 — 키 없이도 찾기는 됩니다.'}</p>`;
+      : 'AI 답변을 쓰려면 설정에서 키를 넣으세요 — 키 없이도 찾기는 됩니다.'}</p>
+    ${searchIndex.ready() ? '' : `<button class="more-btn pressable" data-act="index">
+      본문까지 찾도록 색인 받기 (약 5MB · 한 번만)</button>`}`;
 }
 
 function go(el, q) {
@@ -70,8 +75,10 @@ function paint(el) {
           <span class="doc-name">${esc(h.baseTitle || h.name)}</span>
           <span class="doc-meta">
             <span class="kind k-${esc(h.kind)}">${esc(h.label)}</span>
+            ${(h.where || []).map(w => `<span class="kind k-hit">${esc(w)}</span>`).join('')}
             <span class="where">${esc(h.path)}</span>
           </span>
+          ${h.snippet ? `<span class="hit-snip">${esc(h.snippet)}</span>` : ''}
         </button>`).join('')}</div>
       <div class="set-actions">
         <button class="more-btn pressable" data-act="gather">근거 모으기 (문서 3편)</button>
@@ -100,6 +107,18 @@ async function onClick(e, el) {
   }
   const b = e.target.closest('[data-act]');
   if (!b) return;
+
+  if (b.dataset.act === 'index') {
+    b.disabled = true;
+    try {
+      const n = await searchIndex.pull({ onProgress: (t) => { b.textContent = t; } });
+      if (n == null) shell.toast('PC 가 아직 색인을 내보내지 않았습니다');
+      else { shell.toast(`색인 ${n.toLocaleString()}문서를 받았습니다`, 'ok'); }
+    } catch (err) { shell.toast(err.message, 'error'); }
+    b.disabled = false;
+    renderAi();
+    return;
+  }
 
   if (b.dataset.act === 'gather') {
     b.disabled = true;

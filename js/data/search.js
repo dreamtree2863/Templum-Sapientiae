@@ -11,6 +11,7 @@
  *    꽤 맞는다.
  */
 import * as catalog from './catalog.js';
+import * as index from './searchindex.js';
 import * as classify from './classify.js';
 import * as docContent from './doc-content.js';
 import * as kv from '../core/kv.js';
@@ -65,8 +66,33 @@ function bigrams(s) {
   return set;
 }
 
-/** 질문에 맞는 문서 상위 n편. 카탈로그만 보므로 즉시·오프라인. */
+/**
+ * 질문에 맞는 문서 상위 n편.
+ *
+ * ‼ 색인(본문·소제목·태그)이 있으면 그것을 쓴다 — 데스크톱과 같은 규칙이라 같은 답이
+ *   나온다. 없으면 제목·경로만 보는 예전 방식으로 돌아간다(색인을 안 받았어도 쓸 수 있게).
+ */
 export function rank(query, { limit = 12, root = '' } = {}) {
+  if (index.ready()) {
+    const hits = index.search(query, { limit: limit * 2 });
+    const out = [];
+    for (const h of hits) {
+      const f = index.fileOf(h.path);
+      if (!f) continue;                       // 목록에 없는 문서(지워졌거나 미동기화)
+      if (root && !(f.path || '').startsWith(root)) continue;
+      const info = classify.classify(f);
+      out.push({ ...f, ...info, score: h.score, weak: false,
+                 where: h.where, snippet: h.snippet, tags: h.tags });
+      if (out.length >= limit) break;
+    }
+    if (out.length) return out;
+    // 색인이 아무것도 못 찾았으면 제목·경로로 한 번 더 — 빈손으로 돌려보내지 않는다
+  }
+  return rankByName(query, { limit, root });
+}
+
+/** 제목·경로만 보는 옛 방식 — 색인이 없거나 색인이 못 찾았을 때. */
+function rankByName(query, { limit = 12, root = '' } = {}) {
   const tokens = tokenize(query);
   const pool = catalog.files().filter(f =>
     !classify.isAudio(f.name) && !classify.isSystemPath(f.path)

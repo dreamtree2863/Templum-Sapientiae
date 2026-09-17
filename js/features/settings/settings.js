@@ -9,7 +9,7 @@ import * as shell from '../shell.js';
 import * as router from '../../core/router.js';
 import { get } from '../../core/store.js';
 import * as kv from '../../core/kv.js';
-import { auth, catalog, classify, log, outbox, uplink, search, refresh, storageInfo } from '../../data/index.js';
+import { auth, catalog, classify, log, outbox, uplink, search, searchIndex, refresh, storageInfo } from '../../data/index.js';
 import { applyThemeAll, applyScaleAll } from '../viewer/viewer.js';
 import { checkUpdate, runningVersion } from '../update.js';
 
@@ -28,6 +28,7 @@ export async function renderSync() {
       <button class="more-btn pressable" data-act="send">지금 PC 로 보내기</button>
       <button class="more-btn pressable" data-act="probe">폰 → PC 연결 시험</button>
       <button class="more-btn pressable" data-act="update">앱 갱신 확인</button>
+      <button class="more-btn pressable" data-act="index">검색 색인 받기</button>
     </div>
     <div id="probe"></div>
     <p class="set-note">“전체 다시 훑기”는 Drive 를 처음부터 다시 셉니다.
@@ -38,6 +39,17 @@ export async function renderSync() {
     if (!b) return;
     if (b.dataset.act === 'send') { await onSend(el, b); return; }
     if (b.dataset.act === 'probe') { await onProbe(el, b); return; }
+    if (b.dataset.act === 'index') {
+      b.disabled = true; b.textContent = '받는 중…';
+      try {
+        const n = await searchIndex.pull({ onProgress: (t) => { b.textContent = t; } });
+        shell.toast(n == null ? 'PC 가 아직 색인을 안 내보냈습니다'
+          : `색인 ${n.toLocaleString()}문서`, 'ok');
+        el.querySelector('#body').innerHTML = rowsHtml(await syncFacts());
+      } catch (err) { shell.toast(err.message, 'error'); }
+      b.disabled = false; b.textContent = '검색 색인 받기';
+      return;
+    }
     if (b.dataset.act === 'update') {
       b.disabled = true; b.textContent = '확인 중…';
       try {
@@ -142,6 +154,9 @@ async function syncFacts() {
     ['복기 퀴즈', (counts.quiz || 0) + '편', counts.quiz ? '' : 'warn'],
     ['낭독 음성', audio.toLocaleString() + '개', ''],
     ['보낼 기록', (get('outbox').pending || 0) + '건', ''],
+    ['검색 색인', searchIndex.ready()
+      ? `${searchIndex.size().toLocaleString()}문서 · ${when(searchIndex.at())}`
+      : '아직 없음 (제목만 검색)', searchIndex.ready() ? '' : 'warn'],
     ['마지막 전송', kv.get(LAST_SENT) ? when(kv.get(LAST_SENT)) : '아직 없음', ''],
     ['앱 버전', ver ? ver.replace('templum-shell-', '') : '확인 불가', ver ? '' : 'warn'],
   ];

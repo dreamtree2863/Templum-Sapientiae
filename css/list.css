@@ -288,3 +288,11 @@
   -webkit-appearance: none; appearance: none;
 }
 .set-input:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
+.kind.k-hit { background: #e7eef7; color: #2a4d76; }
+.hit-snip {
+  display: block; margin-top: 5px; font-size: 12px; line-height: 1.55;
+  color: var(--ink-2); word-break: break-word;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .kind.k-hit { background: #1b2734; color: #93bce0; }
+}

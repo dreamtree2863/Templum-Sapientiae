@@ -23,11 +23,12 @@ import * as uplink from './uplink.js';
 import * as review from './review.js';
 import * as mcq from './mcq.js';
 import * as search from './search.js';
+import * as searchIndex from './searchindex.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, search, log };
+export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, search, searchIndex, log };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {
@@ -40,11 +41,13 @@ export async function boot() {
   driveFiles.configure({ getToken: auth.getToken });
   review.configure({ getToken: auth.getToken });
   mcq.configure({ getToken: auth.getToken });
+  searchIndex.configure({ getToken: auth.getToken });
   const cached = await catalog.load();          // 캐시를 먼저 보여 준다(체감 속도)
   const a = await auth.init();
   idb.requestPersist();                          // 캐시가 함부로 비워지지 않게 요청
   await outbox.publish();                        // 보낼 것이 몇 건인지 홈에 바로 뜨게
   await review.load();                           // 오프라인에서도 복습이 되게 사본을 올린다
+  await searchIndex.load();                      // 받아 둔 검색 색인이 있으면 올린다
   return { signedIn: a.signedIn, offline: a.offline, cached };
 }
 
