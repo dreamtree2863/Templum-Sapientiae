@@ -35,9 +35,19 @@ let itemById = new Map();   // id → 오디오·종류가 붙은 항목(build �
 export const files = () => allFiles;
 export const templumId = () => rootId;
 
-/** 목록이 어디서 왔든(전체 스캔·증분·물려받은 옛 캐시) 내부 폴더는 털어 낸다. */
+/** 목록이 어디서 왔든(전체 스캔·증분·물려받은 옛 캐시) 내부 폴더는 털어 낸다.
+ *
+ *  ‼ 한글 경로는 **정규화 형태**를 여기서 한 번에 NFC 로 맞춘다.
+ *    Drive 가 NFD("ㅂㅐㄱㅈㅣ")로 돌려주면, 앱 안의 NFC 문자열("백지")과 겉보기는
+ *    같은데 비교가 어긋나 폴더가 통째로 빈 것처럼 보인다. 들어오는 길목에서 맞춰 두면
+ *    그 뒤 모든 비교가 안전하다.
+ */
 function sanitize(list) {
-  return list.filter(f => !isHiddenPath(f.path));
+  return list.filter(f => !isHiddenPath(f.path)).map(f => {
+    const path = (f.path || '').normalize('NFC');
+    const name = (f.name || '').normalize('NFC');
+    return (path === f.path && name === f.name) ? f : { ...f, path, name };
+  });
 }
 
 /* ── 영속 (IndexedDB) ──────────────────────────────────────────────── */

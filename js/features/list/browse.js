@@ -19,20 +19,43 @@ import { catalog, classify, refresh, markOpened } from '../../data/index.js';
 const esc = shell.escapeHtml;
 const PAGE = 60;
 
-/* 뿌리 — 타일이 여기로 들어온다 */
+/* 뿌리 — 타일이 여기로 들어온다.
+ *
+ *  ‼ 학습지 뿌리는 **경로를 적어 두지 않는다.** 폴더 이름을 코드에 박아 두면
+ *    Drive 가 돌려주는 이름과 한 글자만 달라도(유니코드 정규화·공백) 빈 화면이 된다.
+ *    대신 카탈로그에서 그 종류(recall/quiz)의 문서가 실제로 사는 곳을 찾아 쓴다.
+ *    이러면 폴더 이름이 바뀌어도 따라간다.
+ */
 export const ROOTS = {
   encyclopedia: { path: 'encyclopedia/Library', title: '백과사전' },
   archive: { path: 'archive', title: '아카이브' },
-  recall: { path: 'archive/백지 인출', title: '백지 인출' },
-  quiz: { path: 'archive/복기 퀴즈', title: '복기 퀴즈' },
+  recall: { kind: 'recall', title: '백지 인출', fallback: 'archive/백지 인출' },
+  quiz: { kind: 'quiz', title: '복기 퀴즈', fallback: 'archive/복기 퀴즈' },
 };
+
+/** 이 종류의 문서가 가장 많이 사는 상위 폴더를 찾는다(2단까지). */
+function rootOfKind(kind, fallback) {
+  const count = new Map();
+  for (const f of catalog.files()) {
+    if (classify.isAudio(f.name) || classify.isSystemPath(f.path)) continue;
+    if (classify.classify(f).kind !== kind) continue;
+    const segs = (f.path || '').split('/').filter(Boolean).slice(0, 2).join('/');
+    if (segs) count.set(segs, (count.get(segs) || 0) + 1);
+  }
+  if (!count.size) return fallback;
+  return [...count.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function rootPath(r) {
+  return r.kind ? rootOfKind(r.kind, r.fallback) : r.path;
+}
 
 let state = { path: '', text: '', shown: PAGE };
 let unsub = null;
 
 export function renderBrowse(params = {}) {
   const r = ROOTS[params.root || ''];
-  state = { path: params.p || (r ? r.path : 'archive'), text: '', shown: PAGE };
+  state = { path: params.p || (r ? rootPath(r) : 'archive'), text: '', shown: PAGE };
 
   const el = document.createElement('div');
   el.innerHTML = `
@@ -122,9 +145,7 @@ function paint(el) {
   el.querySelector('#crumb').innerHTML = crumbHtml(path, skipped);
 
   if (!level.folders.length && !level.files.length) {
-    $body.innerHTML = `<div class="empty">${catalog.files().length
-      ? '이 폴더에 문서가 없습니다.'
-      : '아직 목록을 받지 못했습니다.<br>위 ⟳ 로 새로고침해 주세요.'}</div>`;
+    $body.innerHTML = emptyWhy(path);
     return;
   }
 
@@ -137,6 +158,36 @@ function paint(el) {
       ${level.files.length > state.shown
         ? `<button class="more-btn pressable" data-more="1">더 보기 (${(level.files.length - state.shown).toLocaleString()}개 남음)</button>`
         : ''}` : ''}`;
+}
+
+/* ‼ 빈 화면은 반드시 **왜** 비었는지 말해야 한다.
+   "파일이 없다"만 띄우면 목록을 못 받은 것인지, 폴더가 안 맞는 것인지 알 수 없다. */
+function emptyWhy(path) {
+  const total = catalog.files().length;
+  if (!total) {
+    return `<div class="empty">아직 목록을 받지 못했습니다.<br>
+      위 ⟳ 로 새로고침하거나, 설정 → 동기화에서 <b>전체 다시 훑기</b>를 눌러 주세요.</div>`;
+  }
+  // 종류로 세어 보고, 있는데 여기 없으면 어디 있는지 알려 준다
+  const kinds = { 'archive/백지 인출': 'recall', 'archive/복기 퀴즈': 'quiz' };
+  const kind = kinds[path];
+  if (kind) {
+    const real = rootOfKind(kind, '');
+    const n = catalog.files().filter(f => !classify.isAudio(f.name)
+      && classify.classify(f).kind === kind).length;
+    if (n && real && real !== path) {
+      return `<div class="empty">이 경로에는 없지만 <b>${esc(real)}</b> 에 ${n}편 있습니다.
+        <br>아래에서 열어 보세요.</div>
+        <button class="more-btn pressable" data-dir="${esc(real)}">${esc(real)} 로 가기</button>`;
+    }
+    if (!n) {
+      return `<div class="empty">받아 둔 목록 ${total.toLocaleString()}개 중
+        ${esc(kind === 'recall' ? '백지 인출' : '복기 퀴즈')}이 0편입니다.<br>
+        설정 → 동기화에서 <b>전체 다시 훑기</b>를 눌러 주세요.</div>`;
+    }
+  }
+  return `<div class="empty">이 폴더에 문서가 없습니다.
+    <br><small>받아 둔 목록은 ${total.toLocaleString()}개입니다.</small></div>`;
 }
 
 function folderHtml(d) {
