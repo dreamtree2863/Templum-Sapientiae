@@ -102,11 +102,20 @@ function levelAt(prefix) {
     if (cur) cur.docs++;
     else folders.set(seg, { seg, path: head + seg, docs: 1 });
   }
+  const fl = [...folders.values()];
+  // 날짜 폴더(YYYY-MM-DD)만 있는 단은 **최신이 위** — 뉴스 요약처럼 날짜로 쌓이는
+  // 곳에서 73칸을 끝까지 내려야 오늘 것이 나오는 일을 막는다. 이름을 박지 않고
+  // 폴더 이름 모양으로만 판단하므로 폴더가 바뀌어도 따라간다.
+  const byDate = fl.length > 1 && fl.every(d => isDateSeg(d.seg));
   return {
-    folders: [...folders.values()].sort((a, b) => cmp(a.seg, b.seg)),
-    files: files.sort((a, b) => cmp(a.name, b.name)),
+    folders: fl.sort((a, b) => byDate ? cmp(b.seg, a.seg) : cmp(a.seg, b.seg)),
+    files: files.sort((a, b) => isDateSeg(prefix.split('/').pop() || '')
+      ? cmp(b.name, a.name) : cmp(a.name, b.name)),
   };
 }
+
+/** 'YYYY-MM-DD' 모양인가 — 날짜로 쌓이는 폴더를 알아보는 유일한 근거. */
+function isDateSeg(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s); }
 
 /** '01. …' 같은 이름이 10 앞에 오도록 숫자를 숫자로 본다. */
 function cmp(a, b) { return a.localeCompare(b, 'ko', { numeric: true }); }

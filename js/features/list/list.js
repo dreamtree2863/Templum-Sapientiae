@@ -79,7 +79,10 @@ function filtered() {
     }
     out.push({ f, seg });
   }
-  out.sort((a, b) => (a.f.path + a.f.name).localeCompare(b.f.path + b.f.name, 'ko'));
+  // 뉴스 요약은 **최신이 위**다 — 경로가 'archive/뉴스 요약/YYYY-MM-DD/HHMM_주제.html'
+  // 라 경로+이름 내림차순이 곧 시간 역순이다(별도 날짜 파싱 불필요).
+  const dir = q.kind === 'news' ? -1 : 1;
+  out.sort((a, b) => dir * (a.f.path + a.f.name).localeCompare(b.f.path + b.f.name, 'ko'));
   return out;
 }
 
