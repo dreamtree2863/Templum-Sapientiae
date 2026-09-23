@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v38';   // v37 증분이 _state 를 버리던 것 교정 · v38 뉴스 요약 최신순
+const SHELL_CACHE = 'templum-shell-v39';   // v38 뉴스 요약 최신순 · v39 새 날짜 폴더를 증분으로
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다

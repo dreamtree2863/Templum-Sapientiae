@@ -27,7 +27,12 @@ const ROOT_NAME = 'Templum';
  *   예를 들어 `_state/*.json`(복습 카드·객관식 은행)은 담기지 않던 시절의 목록이라,
  *   코드를 고쳐도 목록을 다시 받기 전까지는 그 파일을 영영 못 찾는다.
  *   사용자가 "전체 다시 훑기"를 눌러야만 고쳐지는 상태를 남기지 않는다. */
-const CATALOG_EPOCH = 3;   // 3: 증분이 `_state/*.json` 을 버리던 것을 고침 → 한 번 다시 훑는다
+const CATALOG_EPOCH = 4;   // 4: 새 날짜 폴더가 증분에서 전체 스캔으로 튕기며 빠진 날들을 채운다
+                           //    (3: 증분이 `_state/*.json` 을 버리던 것을 고침)
+
+/* 폴더가 '우리 목록보다 나중에 생겼나'를 볼 때 두는 여유 — 시계 차이·업로드 지연
+   때문에 갓 만든 폴더가 목록 시각보다 조금 이르게 찍힐 수 있다. */
+const FOLDER_BIRTH_SLACK = 10 * 60 * 1000;
 
 const CHANGES_TOKEN = 'changesToken.v2';
 const DEAD_TOKEN = 'changesToken.v1';          // 옛 앱이 남긴 커서 — 믿지 않는다
@@ -250,8 +255,19 @@ async function applyChanges(entries) {
     }
     if (!f) continue;
     if (f.mimeType === 'application/vnd.google-apps.folder') {
-      const under = !!folderMap[id] || (await resolvePath(f.parents?.[0] || null)) !== null;
-      if (under) return false;                 // Templum 안 폴더 생성/이름변경/이동 → 전체 스캔
+      if (folderMap[id]) return false;         // 알던 폴더의 이름변경·이동 → 하위 경로 전부 영향
+      const parent = await resolvePath(f.parents?.[0] || null);
+      if (parent === null) continue;           // Templum 밖 — 우리와 무관
+      /* ‼ **갓 만들어진** 폴더는 전체 스캔까지 갈 일이 아니다.
+         뉴스 요약은 날마다 'YYYY-MM-DD' 폴더를 하나 만든다. 여기서 전체 스캔으로
+         넘기면 폰은 새 문서 3편을 보려고 폴더 600여 개를 매일 다시 훑어야 했고,
+         그 스캔이 끊기면 그날 것이 영영 안 보였다(실제로 22·23일이 그랬다).
+         폴더만 폴더맵에 배워 두면 그 안의 파일은 제 변경 항목으로 따라 들어온다.
+         반대로 **예전에 만들어진** 폴더가 이제야 보이면 밖에서 옮겨 온 것이다 —
+         그 안의 것들은 변경 목록에 안 나오므로 전체 스캔이 맞다. */
+      const born = Date.parse(f.createdTime || '') || 0;
+      if (!born || born < (fetchedAt || 0) - FOLDER_BIRTH_SLACK) return false;
+      folderMap[id] = { name: f.name, parentId: f.parents?.[0] || null };
       continue;
     }
     /* ‼ 경로를 **먼저** 알아낸 뒤에 담을지 정한다.

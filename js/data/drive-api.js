@@ -163,7 +163,7 @@ export async function fetchChanges(pageToken) {
       pageSize: 200,
       restrictToMyDrive: true,
       fields: 'newStartPageToken,nextPageToken,'
-            + 'changes(fileId,removed,file(id,name,mimeType,modifiedTime,size,parents,trashed))',
+            + 'changes(fileId,removed,file(id,name,mimeType,createdTime,modifiedTime,size,parents,trashed))',
     });
     entries.push(...(res.changes || []));
     if (res.newStartPageToken) return { entries, newToken: res.newStartPageToken };
