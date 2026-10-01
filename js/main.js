@@ -136,8 +136,40 @@ async function boot() {
     } finally { $refresh.classList.remove('spinning'); }
   });
 
+  /* 토큰 만료 ≠ 로그아웃. 로그인한 적이 있으면 '터치하면 이어진다'는 띠만 띄우고,
+     첫 터치에서 auth 가 조용히 갱신한다(설치형 PWA 는 터치 없는 팝업을 막는다). */
+  let renewBanner = null;
+  let refreshAfterRenew = false;
+  const showRenewBanner = () => {
+    if (renewBanner?.isConnected) return;
+    shell.banner('연결이 만료됐습니다 — 화면을 한 번 누르면 다시 연결됩니다.',
+      { action: '다시 연결', onAction: () => data.auth.renew() });
+    renewBanner = document.querySelector('.banner');
+    refreshAfterRenew = true;
+  };
+  on(EVENTS.AUTH_CHANGED, ({ signedIn, renewable }) => {
+    if (signedIn) {
+      if (renewBanner?.isConnected) renewBanner.remove();
+      renewBanner = null;
+      if (refreshAfterRenew) {
+        refreshAfterRenew = false;
+        data.refresh().catch(e => log.warn('auth', '재연결 후 새로고침 실패', e));
+      }
+    } else if (renewable) {
+      showRenewBanner();
+    }
+  });
+  // 앱을 다시 볼 때 곧 만료될 토큰이면 미리 알려 둔다(갱신 자체는 다음 터치에서)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && navigator.onLine && data.auth.needsRenew() && !data.auth.getToken()) {
+      showRenewBanner();
+    }
+  });
+
   if (res.signedIn) {
     data.refresh().catch(e => log.warn('boot', '첫 새로고침 실패', e));
+  } else if (res.renewable && !res.offline) {
+    showRenewBanner();
   } else if (!res.offline) {
     shell.banner('구글 계정으로 로그인하면 자료를 받아옵니다.',
       { action: '로그인', onAction: () => data.auth.signIn() });

@@ -48,7 +48,7 @@ export async function boot() {
   await outbox.publish();                        // 보낼 것이 몇 건인지 홈에 바로 뜨게
   await review.load();                           // 오프라인에서도 복습이 되게 사본을 올린다
   await searchIndex.load();                      // 받아 둔 검색 색인이 있으면 올린다
-  return { signedIn: a.signedIn, offline: a.offline, cached };
+  return { signedIn: a.signedIn, offline: a.offline, cached, renewable: !!a.renewable };
 }
 
 /** 목록 새로고침 — 버튼·당겨서 새로고침이 부른다. */

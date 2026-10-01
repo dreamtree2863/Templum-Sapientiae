@@ -6,7 +6,14 @@
  *    · 토큰에 **scope 를 함께 기록** — 4단계에서 쓰기 권한을 더할 때
  *      "지금 토큰이 어디까지 되는가"를 알아야 재동의를 걸 수 있다.
  *
- *  리프레시 토큰은 없다(브라우저 암묵 흐름). 1시간 만료 → 401 → silent 재인증.
+ *  리프레시 토큰은 없다(브라우저 암묵 흐름). 토큰은 1시간이면 만료된다.
+ *
+ *  ‼ '조용한' 재인증(prompt:'')도 실제로는 팝업을 연다. 설치형 PWA(안드로이드)는
+ *    **사용자 터치 없이 연 팝업을 막는다** → 401·재실행 때의 자동 재인증이 실패하고
+ *    로그아웃된 것처럼 보였다(2026-10-01). 그래서:
+ *    · 재인증은 **터치 순간에** 한다 — 토큰이 없거나 10분 안에 만료되면 다음 터치에서 갱신.
+ *    · 한 번 로그인한 적이 있으면(auth.ever) 만료돼도 '로그아웃'이 아니라 '갱신 대기'로 본다.
+ *    · 계정 힌트(login_hint)로 계정 선택 창 없이 갱신한다.
  */
 import * as kv from '../core/kv.js';
 import { emit, EVENTS } from '../core/bus.js';
@@ -21,24 +28,65 @@ export const SCOPE_READ = 'https://www.googleapis.com/auth/drive.readonly';
 export const SCOPE_WRITE = 'https://www.googleapis.com/auth/drive.file';
 
 const TOKEN_KEY = 'auth.v2';          // {token, expiresAt, scopes[]}
+const EVER_KEY = 'auth.ever';         // 한 번이라도 로그인했는가 — 만료 ≠ 로그아웃
+const EMAIL_KEY = 'auth.email';       // login_hint 용 계정 주소
+const RENEW_AHEAD_MS = 10 * 60_000;   // 만료 10분 전부터 다음 터치에서 미리 갱신
 
 let tokenClient = null;
 let token = null;
+let expiresAt = 0;
 let scopes = [];
 let silentTried = false;
+let renewing = false;
 
 /* ── 토큰 보관 ─────────────────────────────────────────────────────── */
 function store(tok, expiresIn, granted) {
   scopes = String(granted || SCOPE_READ).split(/\s+/).filter(Boolean);
   token = tok;
-  kv.set(TOKEN_KEY, {
-    token: tok,
-    expiresAt: Date.now() + (Number(expiresIn) || 3600) * 1000,
-    scopes,
-  });
+  expiresAt = Date.now() + (Number(expiresIn) || 3600) * 1000;
+  kv.set(TOKEN_KEY, { token: tok, expiresAt, scopes });
+  kv.set(EVER_KEY, true);
+  renewing = false;
   patch('auth', { signedIn: true, scopes });
   postTokenToSW();
   emit(EVENTS.AUTH_CHANGED, { signedIn: true, scopes });
+  if (!kv.get(EMAIL_KEY)) rememberEmail(tok);
+}
+
+/** 계정 주소를 한 번 받아 둔다 — 다음 갱신부터 계정 선택 창 없이 넘어가게. */
+async function rememberEmail(tok) {
+  try {
+    const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)',
+      { headers: { Authorization: 'Bearer ' + tok } });
+    const email = r.ok ? (await r.json())?.user?.emailAddress : '';
+    if (email) { kv.set(EMAIL_KEY, email); patch('auth', { email }); }
+  } catch (e) { /* 힌트는 없어도 동작한다 */ }
+}
+
+function withHint(opts) {
+  const email = kv.get(EMAIL_KEY);
+  return email ? { ...opts, login_hint: email } : opts;
+}
+
+/** 로그인한 적은 있는데 지금 쓸 토큰이 없다 = 터치 한 번으로 이어 붙일 수 있는 상태. */
+export const wasSignedIn = () => !!kv.get(EVER_KEY);
+export const needsRenew = () => wasSignedIn() && (!token || expiresAt - Date.now() < RENEW_AHEAD_MS);
+
+/** 터치 순간에 부른다(팝업 허용). 토큰이 없거나 곧 만료되면 조용히 갱신. */
+export function renew() {
+  if (!tokenClient || renewing || !needsRenew()) return false;
+  renewing = true;
+  silentTried = true;
+  try { tokenClient.requestAccessToken(withHint({ prompt: '' })); }
+  catch (e) { renewing = false; silentTried = false; return false; }
+  return true;
+}
+
+/** 화면 어디든 처음 누르는 순간 갱신을 건다 — capture 단계라 다른 처리보다 먼저. */
+function armGestureRenew() {
+  const onTouch = () => { if (navigator.onLine) renew(); };
+  document.addEventListener('pointerdown', onTouch, true);
+  document.addEventListener('keydown', onTouch, true);
 }
 
 function loadStored() {
@@ -47,6 +95,7 @@ function loadStored() {
   // 60초 여유로 만료 판정 — Drive 호출 도중 만료되는 것을 피한다
   if (d.expiresAt && d.expiresAt > Date.now() + 60_000) {
     scopes = d.scopes || [SCOPE_READ];
+    expiresAt = d.expiresAt;
     return d.token;
   }
   return null;
@@ -54,7 +103,9 @@ function loadStored() {
 
 export function clear() {
   kv.del(TOKEN_KEY);
+  kv.del(EVER_KEY);
   token = null;
+  expiresAt = 0;
   scopes = [];
   patch('auth', { signedIn: false, scopes: [] });
   emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes: [] });
@@ -113,6 +164,7 @@ export async function init({ scope = SCOPE_READ } = {}) {
     scope,
     include_granted_scopes: true,      // 이미 받은 권한을 유지한 채 더한다
     callback: (resp) => {
+      renewing = false;
       if (resp.error) {
         // silent 실패는 조용히 — 사용자가 직접 누르게 둔다
         if (!silentTried) emit(EVENTS.TOAST, { text: '로그인 실패: ' + resp.error, kind: 'error' });
@@ -121,17 +173,25 @@ export async function init({ scope = SCOPE_READ } = {}) {
       }
       store(resp.access_token, resp.expires_in, resp.scope);
     },
+    // 팝업이 막히거나 닫힌 경우 — 콜백이 안 오므로 여기서 풀어 줘야 다음 터치에서 다시 시도한다
+    error_callback: (err) => {
+      renewing = false;
+      if (!silentTried) emit(EVENTS.TOAST, { text: '로그인 창을 열지 못했습니다: ' + (err?.type || ''), kind: 'error' });
+      silentTried = false;
+    },
   });
 
-  if (!token) await trySilent();
-  return { ok: true, offline: false, signedIn: !!token };
+  armGestureRenew();
+  // 처음 쓰는 사람만 기동 때 시도한다. 로그인한 적이 있으면 첫 터치에서 갱신(팝업 차단 회피).
+  if (!token && !wasSignedIn()) await trySilent();
+  return { ok: true, offline: false, signedIn: !!token, renewable: !token && wasSignedIn() };
 }
 
 /** 구글에 이미 로그인돼 있으면 동의 화면 없이 토큰을 받는다. */
 export function trySilent() {
   if (!tokenClient) return Promise.resolve(false);
   silentTried = true;
-  try { tokenClient.requestAccessToken({ prompt: '' }); } catch (e) { silentTried = false; }
+  try { tokenClient.requestAccessToken(withHint({ prompt: '' })); } catch (e) { silentTried = false; }
   return Promise.resolve(true);
 }
 
@@ -141,19 +201,25 @@ export function signIn({ scope } = {}) {
     emit(EVENTS.TOAST, { text: '로그인 준비가 안 됐습니다. 연결을 확인해 주세요.', kind: 'error' });
     return;
   }
+  if (renewing && !scope) return;        // 같은 터치에서 armGestureRenew 가 이미 요청했다
   silentTried = false;
-  const opts = { prompt: 'consent' };
+  // 이미 동의한 사람이 권한을 더하지 않는다면 동의 화면 없이(prompt:'') — 탭 한 번에 끝난다
+  const opts = withHint({ prompt: (wasSignedIn() && !scope) ? '' : 'consent' });
   if (scope) opts.scope = scope;
+  renewing = true;
   tokenClient.requestAccessToken(opts);
 }
 
-/** 401 을 받았을 때 drive-api 가 부른다. */
+/** 401 을 받았을 때 drive-api 가 부른다.
+ *  ‼ 여기서 팝업을 열면 막힌다(터치가 아니다). 토큰만 비우고 '갱신 대기'로 알린다 —
+ *    로그인한 적은 그대로 기억하므로 다음 터치에서 armGestureRenew 가 이어 붙인다. */
 export function onUnauthorized() {
-  log.warn('auth', '토큰 만료 — 재인증 시도');
+  log.warn('auth', '토큰 만료 — 다음 터치에서 갱신');
   kv.del(TOKEN_KEY);
   token = null;
+  expiresAt = 0;
   patch('auth', { signedIn: false, scopes: [] });
-  trySilent();
+  emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes: [], renewable: wasSignedIn() });
 }
 
 /** 4단계에서 쓰기 권한이 필요해질 때. */
