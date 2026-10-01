@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v40';   // v38 뉴스 요약 최신순 · v39 새 날짜 폴더를 증분으로 · v40 토큰 만료 = 터치로 갱신(로그아웃 방지)
+const SHELL_CACHE = 'templum-shell-v41';   // v38 뉴스 요약 최신순 · v39 새 날짜 폴더를 증분으로 · v40 토큰 만료 = 터치로 갱신(로그아웃 방지) · v41 토큰 중계(1시간 제한 해제)
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
@@ -61,7 +61,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
-      keys.filter(k => k !== SHELL_CACHE && k !== DOC_CACHE).map(k => caches.delete(k))
+      keys.filter(k => k !== SHELL_CACHE && k !== DOC_CACHE && k !== AUTH_CACHE).map(k => caches.delete(k))
     ))
   );
   self.clients.claim();
@@ -70,7 +70,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('message', (event) => {
   const d = event.data;
   if (d === 'skipWaiting') { self.skipWaiting(); return; }
-  if (d && d.type === 'token' && d.token) swToken = d.token;
+  if (d && d.type === 'token' && d.token) {
+    swToken = d.token;
+    swBroker = d.broker || null;
+    caches.open(AUTH_CACHE).then(c => Promise.all([
+      c.put('token', new Response(d.token)),
+      swBroker ? c.put('broker', new Response(JSON.stringify(swBroker))) : c.delete('broker'),
+    ])).catch(() => {});
+  }
   // 지금 도는 셸이 몇 판인지 — 설정 화면에 띄워 "왜 새 기능이 안 보이지"를 없앤다
   if (d && d.type === 'version' && event.ports && event.ports[0]) {
     event.ports[0].postMessage({ version: SHELL_CACHE });
@@ -79,14 +86,52 @@ self.addEventListener('message', (event) => {
 
 /** <audio> 같은 직접 요청에는 인증 헤더가 없다 — 보관 토큰으로 채운다.
  *  Range 등 원래 헤더는 그대로 복사해 스트리밍·탐색을 유지한다. */
-function withAuth(req) {
-  if (req.headers.has('Authorization') || !swToken) return req;
+function withAuth(req, tok = swToken) {
+  if (req.headers.has('Authorization') || !tok) return req;
   const h = new Headers(req.headers);
-  h.set('Authorization', 'Bearer ' + swToken);
+  h.set('Authorization', 'Bearer ' + tok);
   return new Request(req.url, {
     method: req.method, headers: h,
     mode: 'cors', credentials: 'omit', redirect: 'follow',
   });
+}
+
+/* 토큰 중계(Apps Script) — 화면이 꺼져 페이지 타이머가 멈춘 채 토큰이 만료돼도,
+   401 을 받으면 SW 가 직접 중계에서 새 읽기 토큰을 받아 같은 요청을 다시 보낸다.
+   SW 가 재시작돼 메모리가 비면 캐시(AUTH_CACHE)에서 토큰·중계 설정을 되살린다. */
+const AUTH_CACHE = 'templum-auth';
+let swBroker = null;
+let brokerInflight = null;
+async function restoreAuth() {
+  try {
+    const c = await caches.open(AUTH_CACHE);
+    if (!swToken) { const r = await c.match('token'); if (r) swToken = await r.text(); }
+    if (!swBroker) { const r = await c.match('broker'); if (r) swBroker = JSON.parse(await r.text()); }
+  } catch (e) { /* 무시 */ }
+}
+function brokerToken() {
+  if (brokerInflight) return brokerInflight;
+  brokerInflight = (async () => {
+    await restoreAuth();
+    if (!swBroker || !swBroker.url || !swBroker.key) return '';
+    const r = await fetch(`${swBroker.url}?key=${encodeURIComponent(swBroker.key)}&app=study-sw`, { cache: 'no-store' });
+    const d = await r.json().catch(() => ({}));
+    if (!d.token) return '';
+    swToken = d.token;
+    caches.open(AUTH_CACHE).then(c => c.put('token', new Response(d.token))).catch(() => {});
+    return d.token;
+  })().catch(() => '').finally(() => { brokerInflight = null; });
+  return brokerInflight;
+}
+async function streamWithAuth(req) {
+  await restoreAuth();
+  const injected = !req.headers.has('Authorization');
+  let res = await fetch(withAuth(req), { cache: 'no-store' });
+  if (res.status === 401 && injected) {
+    const fresh = await brokerToken();
+    if (fresh) res = await fetch(withAuth(req, fresh), { cache: 'no-store' });
+  }
+  return res;
 }
 
 self.addEventListener('fetch', (event) => {
@@ -101,7 +146,7 @@ self.addEventListener('fetch', (event) => {
     // 음성·영상 스트리밍 — 캐시하지 않고 Range 그대로 흘린다
     if (req.destination === 'audio' || req.destination === 'video' || req.headers.has('range')) {
       event.respondWith(
-        fetch(withAuth(req), { cache: 'no-store' }).catch(() => new Response('', { status: 504 }))
+        streamWithAuth(req).catch(() => new Response('', { status: 504 }))
       );
       return;
     }

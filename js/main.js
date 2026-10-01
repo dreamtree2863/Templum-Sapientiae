@@ -83,8 +83,25 @@ function wireUplink() {
   go();
 }
 
+/* ── 설정 링크(#broker=<base64url JSON {url,key}>) ─────────────────────
+ *  폰에서 한 번 누르면 토큰 중계가 설정된다. 주소·키는 이 기기에만 저장하고
+ *  주소창에서 즉시 지운다 — 공개 저장소라 코드에 키를 넣으면 누구나 Drive 를 읽게 된다.
+ *  라우터보다 먼저 처리해야 '#broker=' 가 화면 주소로 오해받지 않는다. */
+function takeBrokerLink() {
+  const m = location.hash.match(/^#broker=([A-Za-z0-9_-]+)$/);
+  if (!m) return '';
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const cfg = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(cfg.url || '') || !cfg.key) throw new Error('bad');
+    data.auth.saveBrokerCfg(cfg.url, cfg.key);
+    return 'ok';
+  } catch (e) { return 'bad'; }
+}
+
 /* ── 기동 ─────────────────────────────────────────────────────────── */
 async function boot() {
+  const linked = takeBrokerLink();
   const kvTheme = localStorage.getItem('templum.' + THEME_KEY);
   applyTheme(kvTheme ? JSON.parse(kvTheme) : 'system');
   const kvScale = localStorage.getItem('templum.' + SCALE_KEY);
@@ -109,6 +126,8 @@ async function boot() {
   });
 
   router.start();                       // 캐시가 없어도 화면은 먼저 띄운다
+  if (linked === 'ok') shell.toast('토큰 중계를 설정했습니다 — 1시간 제한이 풀립니다', 'ok');
+  if (linked === 'bad') shell.toast('설정 링크가 올바르지 않습니다', 'error');
 
   let res;
   try {
@@ -140,23 +159,28 @@ async function boot() {
      첫 터치에서 auth 가 조용히 갱신한다(설치형 PWA 는 터치 없는 팝업을 막는다). */
   let renewBanner = null;
   let refreshAfterRenew = false;
-  const showRenewBanner = () => {
+  const showRenewBanner = (writeOnly) => {
     if (renewBanner?.isConnected) return;
-    shell.banner('연결이 만료됐습니다 — 화면을 한 번 누르면 다시 연결됩니다.',
+    shell.banner(writeOnly
+      ? 'PC 로 보낼 기록이 있습니다 — 화면을 한 번 누르면 이어서 보냅니다.'
+      : '연결이 만료됐습니다 — 화면을 한 번 누르면 다시 연결됩니다.',
       { action: '다시 연결', onAction: () => data.auth.renew() });
     renewBanner = document.querySelector('.banner');
-    refreshAfterRenew = true;
+    refreshAfterRenew = !writeOnly;
   };
   on(EVENTS.AUTH_CHANGED, ({ signedIn, renewable }) => {
-    if (signedIn) {
+    // 토큰 중계가 있으면 읽기는 늘 되고, 띠는 '보낼 기록이 쓰기 로그인을 기다릴 때'만 뜬다
+    const writeWait = data.auth.brokerStatus().writeWanted;
+    if (signedIn && !writeWait) {
       if (renewBanner?.isConnected) renewBanner.remove();
       renewBanner = null;
       if (refreshAfterRenew) {
         refreshAfterRenew = false;
         data.refresh().catch(e => log.warn('auth', '재연결 후 새로고침 실패', e));
       }
+      if (data.auth.getWriteToken()) data.uplink.flush().catch(() => {});   // 밀린 기록이 있으면 바로 보낸다
     } else if (renewable) {
-      showRenewBanner();
+      showRenewBanner(signedIn && writeWait);
     }
   });
   // 앱을 다시 볼 때 곧 만료될 토큰이면 미리 알려 둔다(갱신 자체는 다음 터치에서)

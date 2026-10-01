@@ -296,3 +296,10 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .kind.k-hit { background: #1b2734; color: #93bce0; }
 }
+
+/* 설정 › 동기화 — 토큰 중계 입력칸 */
+.set-input {
+  display: block; width: 100%; box-sizing: border-box; margin: 0 0 8px;
+  padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px;
+  background: transparent; color: var(--ink); font: inherit; font-size: 13px;
+}

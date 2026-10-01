@@ -38,7 +38,7 @@ export async function boot() {
   });
   docContent.configure({ getToken: auth.getToken });
   audio.configure({ getToken: auth.getToken });
-  driveFiles.configure({ getToken: auth.getToken });
+  driveFiles.configure({ getToken: auth.getWriteToken });   // 쓰기(폰→PC)는 앱 로그인 토큰만 — 중계 토큰은 읽기 전용
   review.configure({ getToken: auth.getToken });
   mcq.configure({ getToken: auth.getToken });
   searchIndex.configure({ getToken: auth.getToken });

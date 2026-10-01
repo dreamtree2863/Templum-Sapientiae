@@ -43,11 +43,13 @@ function stamp() {
 export async function flush({ silent = true } = {}) {
   if (busy) return { skipped: 'busy' };
   if (!navigator.onLine) return { skipped: 'offline' };
-  if (!auth.signedIn()) return { skipped: 'signed-out' };
-  if (!auth.hasScope(auth.SCOPE_WRITE)) return { skipped: 'no-write-scope' };
-
+  // 보낼 것이 있는지 먼저 — 없으면 로그인 상태와 무관하게 끝(빈손으로 갱신을 조르지 않는다)
   const rows = await outbox.pending();
   if (!rows.length) return { sent: 0, kept: 0 };
+  if (!auth.wasSignedIn() && !auth.signedIn()) return { skipped: 'signed-out' };
+  if (!auth.hasScope(auth.SCOPE_WRITE)) return { skipped: 'no-write-scope' };
+  // 쓰기는 앱 로그인 토큰만 된다(중계 토큰은 읽기 전용). 만료면 다음 터치에서 갱신하고 그때 보낸다.
+  if (!auth.getWriteToken()) { auth.wantWrite(); return { skipped: 'signed-out' }; }
 
   busy = true;
   patch('outbox', { sending: true });

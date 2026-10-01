@@ -47,10 +47,92 @@ function store(tok, expiresIn, granted) {
   kv.set(TOKEN_KEY, { token: tok, expiresAt, scopes });
   kv.set(EVER_KEY, true);
   renewing = false;
+  writeWanted = false;
   patch('auth', { signedIn: true, scopes });
   postTokenToSW();
   emit(EVENTS.AUTH_CHANGED, { signedIn: true, scopes });
   if (!kv.get(EMAIL_KEY)) rememberEmail(tok);
+}
+
+/* ── 토큰 중계(Google Apps Script, 2026-10-01) — 1시간 제한 해제 ─────────
+ *  소유자 계정으로 도는 웹 앱이 **읽기 전용** 토큰을 팝업 없이 준다
+ *  (설정 › 동기화에서 주소·키 입력. 주소·키는 이 기기에만 — 저장소에 올리지 않는다).
+ *  · 읽기(목록·문서·낭독)는 이 토큰. 만료 10분 전에 미리 다시 받는다(호출이 ~5초).
+ *  · 쓰기(폰→PC 기록)는 앱 로그인(drive.file). 보낼 것이 있을 때만 터치로 갱신(writeWanted).
+ *  · SW 도 주소·키를 받아 두어, 화면이 꺼진 채 만료돼도 낭독 스트리밍을 스스로 이어 간다. */
+const BROKER_KEY = 'auth.broker';      // {url, key}
+const BROKER_TOK = 'auth.brokerTok';   // {t, exp}
+let brokerTok = '';
+let brokerExp = 0;
+let brokerTimer = null;
+let brokerBusy = null;
+let writeWanted = false;
+
+export const brokerCfg = () => { const b = kv.get(BROKER_KEY); return (b && b.url && b.key) ? b : null; };
+const brokerFresh = () => !!brokerTok && Date.now() < brokerExp;
+export function brokerStatus() {
+  return { configured: !!brokerCfg(), fresh: brokerFresh(),
+    minutesLeft: brokerFresh() ? Math.max(1, Math.round((brokerExp - Date.now()) / 60_000)) : 0,
+    error: kv.get('auth.brokerErr') || '', url: brokerCfg()?.url || '', writeWanted };
+}
+function restoreBroker() {
+  const b = kv.get(BROKER_TOK);
+  if (b && b.t && b.exp > Date.now() + 60_000) { brokerTok = b.t; brokerExp = b.exp; }
+}
+export function refreshBroker() {
+  const cfg = brokerCfg();
+  if (!cfg) return Promise.reject(new Error('토큰 중계 미설정'));
+  if (brokerBusy) return brokerBusy;
+  brokerBusy = (async () => {
+    try {
+      const r = await fetch(`${cfg.url}?key=${encodeURIComponent(cfg.key)}&app=study`, { cache: 'no-store' });
+      const d = await r.json().catch(() => ({}));
+      if (!d.token) throw new Error(d.error === 'forbidden' ? '키가 맞지 않습니다' : (d.error || '중계 응답 ' + r.status));
+      brokerTok = d.token;
+      brokerExp = Date.now() + (Number(d.expires_in) || 3000) * 1000 - 60_000;
+      kv.set(BROKER_TOK, { t: brokerTok, exp: brokerExp });
+      kv.set('auth.brokerErr', '');
+      patch('auth', { signedIn: true });
+      postTokenToSW();
+      emit(EVENTS.AUTH_CHANGED, { signedIn: true, scopes });
+      scheduleBroker();
+      return brokerTok;
+    } catch (e) {
+      kv.set('auth.brokerErr', String(e.message || e));
+      scheduleBroker(60_000);
+      throw e;
+    } finally { brokerBusy = null; }
+  })();
+  return brokerBusy;
+}
+function scheduleBroker(ms) {
+  clearTimeout(brokerTimer);
+  if (!brokerCfg()) return;
+  const wait = ms ?? Math.max(30_000, brokerExp - Date.now() - RENEW_AHEAD_MS);
+  brokerTimer = setTimeout(() => refreshBroker().catch(() => {}), wait);
+}
+/** 설정 링크로 받은 값 저장만(기동 전) — 시험은 init 이 토큰을 받으며 한다. */
+export function saveBrokerCfg(url, key) {
+  kv.set(BROKER_KEY, { url, key });
+  kv.del(BROKER_TOK);
+  brokerTok = ''; brokerExp = 0;
+}
+/** 설정 화면에서 저장 — 바로 시험해 결과를 돌려준다. */
+export function setBroker(url, key) {
+  kv.set(BROKER_KEY, { url, key });
+  brokerTok = ''; brokerExp = 0;
+  return refreshBroker();
+}
+export function clearBroker() {
+  kv.del(BROKER_KEY); kv.del(BROKER_TOK); kv.del('auth.brokerErr');
+  brokerTok = ''; brokerExp = 0; clearTimeout(brokerTimer);
+  postTokenToSW();
+}
+/** 보낼 기록이 있는데 쓰기 로그인이 만료 — 다음 터치에서 갱신하도록 표시하고 알린다. */
+export function wantWrite() {
+  if (writeWanted) return;
+  writeWanted = true;
+  emit(EVENTS.AUTH_CHANGED, { signedIn: !!getToken(), scopes, renewable: wasSignedIn() });
 }
 
 /** 계정 주소를 한 번 받아 둔다 — 다음 갱신부터 계정 선택 창 없이 넘어가게. */
@@ -70,7 +152,9 @@ function withHint(opts) {
 
 /** 로그인한 적은 있는데 지금 쓸 토큰이 없다 = 터치 한 번으로 이어 붙일 수 있는 상태. */
 export const wasSignedIn = () => !!kv.get(EVER_KEY);
-export const needsRenew = () => wasSignedIn() && (!token || expiresAt - Date.now() < RENEW_AHEAD_MS);
+// 중계가 있으면 앱 로그인은 '보낼 것'이 있을 때만 갱신한다(1시간마다 팝업을 띄우지 않게)
+export const needsRenew = () => wasSignedIn() && (!token || expiresAt - Date.now() < RENEW_AHEAD_MS)
+  && (!brokerCfg() || writeWanted);
 
 /** 터치 순간에 부른다(팝업 허용). 토큰이 없거나 곧 만료되면 조용히 갱신. */
 export function renew() {
@@ -92,9 +176,10 @@ function armGestureRenew() {
 function loadStored() {
   const d = kv.get(TOKEN_KEY);
   if (!d || !d.token) return null;
+  // 받은 권한은 만료돼도 기억한다 — 쓰기 동의를 또 묻지 않게(갱신은 prompt:'' 로 된다)
+  scopes = d.scopes || [SCOPE_READ];
   // 60초 여유로 만료 판정 — Drive 호출 도중 만료되는 것을 피한다
   if (d.expiresAt && d.expiresAt > Date.now() + 60_000) {
-    scopes = d.scopes || [SCOPE_READ];
     expiresAt = d.expiresAt;
     return d.token;
   }
@@ -111,17 +196,23 @@ export function clear() {
   emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes: [] });
 }
 
-export const getToken = () => token;
-export const signedIn = () => !!token;
+const writeFresh = () => !!token && expiresAt > Date.now() + 60_000;
+/** 읽기용 — 중계 토큰 우선, 없으면 앱 로그인 토큰. */
+export const getToken = () => brokerFresh() ? brokerTok : (writeFresh() ? token : (brokerCfg() ? '' : token));
+/** 쓰기용(drive.file) — 앱 로그인 토큰만, 만료면 null. */
+export const getWriteToken = () => writeFresh() ? token : null;
+export const signedIn = () => !!getToken();
 export const hasScope = (s) => scopes.includes(s);
 
 /* ── 서비스워커에 토큰 전달 ─────────────────────────────────────────
  *  SW 가 <audio> 요청에 Authorization 을 끼워 넣어야 통째 다운로드 없이
- *  Range 스트리밍이 된다. 토큰은 SW 메모리에만 머문다. */
+ *  Range 스트리밍이 된다. 토큰은 SW 메모리에만 머문다.
+ *  중계 설정(주소·키)도 함께 보낸다 — SW 가 401 을 받으면 스스로 새 토큰을 받는다. */
 export function postTokenToSW() {
   try {
     const sw = navigator.serviceWorker;
-    if (sw?.controller && token) sw.controller.postMessage({ type: 'token', token });
+    const t = getToken();
+    if (sw?.controller && t) sw.controller.postMessage({ type: 'token', token: t, broker: brokerCfg() });
   } catch (e) { /* 무시 */ }
 }
 
@@ -146,17 +237,27 @@ function waitForGsi(tries = 30) {
  */
 export async function init({ scope = SCOPE_READ } = {}) {
   const cached = loadStored();
-  if (cached) {
-    token = cached;
+  if (cached) token = cached;
+  restoreBroker();
+  // 중계가 있는데 읽기 토큰이 없으면 팝업 없이 받아 온다(~5초). 실패해도 기동은 계속.
+  if (brokerCfg() && !brokerFresh()) { try { await refreshBroker(); } catch (e) { log.warn('auth', '토큰 중계 실패', e); } }
+  else if (brokerCfg()) scheduleBroker();
+  if (getToken()) {
     patch('auth', { signedIn: true, scopes });
     postTokenToSW();
     emit(EVENTS.AUTH_CHANGED, { signedIn: true, scopes });
   }
+  // 앱을 다시 볼 때 중계 토큰이 곧 만료되면 미리 받는다(백그라운드에선 타이머가 늦을 수 있다)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && brokerCfg() && brokerExp - Date.now() < RENEW_AHEAD_MS) {
+      refreshBroker().catch(() => {});
+    }
+  });
 
   const ok = await waitForGsi();
   if (!ok) {
     log.warn('auth', 'GSI 를 불러오지 못했습니다(오프라인?) — 캐시로 진행');
-    return { ok: false, offline: true, signedIn: !!token };
+    return { ok: false, offline: true, signedIn: !!getToken() };
   }
 
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -183,8 +284,8 @@ export async function init({ scope = SCOPE_READ } = {}) {
 
   armGestureRenew();
   // 처음 쓰는 사람만 기동 때 시도한다. 로그인한 적이 있으면 첫 터치에서 갱신(팝업 차단 회피).
-  if (!token && !wasSignedIn()) await trySilent();
-  return { ok: true, offline: false, signedIn: !!token, renewable: !token && wasSignedIn() };
+  if (!getToken() && !wasSignedIn()) await trySilent();
+  return { ok: true, offline: false, signedIn: !!getToken(), renewable: !getToken() && wasSignedIn() };
 }
 
 /** 구글에 이미 로그인돼 있으면 동의 화면 없이 토큰을 받는다. */
@@ -214,12 +315,21 @@ export function signIn({ scope } = {}) {
  *  ‼ 여기서 팝업을 열면 막힌다(터치가 아니다). 토큰만 비우고 '갱신 대기'로 알린다 —
  *    로그인한 적은 그대로 기억하므로 다음 터치에서 armGestureRenew 가 이어 붙인다. */
 export function onUnauthorized() {
+  // 중계가 있으면 읽기 토큰만 새로 받는다 — 팝업도 띠도 없다
+  if (brokerCfg()) {
+    log.warn('auth', '읽기 토큰 만료 — 중계에서 다시 받음');
+    brokerTok = ''; brokerExp = 0;
+    refreshBroker().catch(() => emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes, renewable: wasSignedIn() }));
+    return;
+  }
   log.warn('auth', '토큰 만료 — 다음 터치에서 갱신');
-  kv.del(TOKEN_KEY);
+  // 받은 권한(scopes)은 남겨 둔다 — 지우면 쓰기 동의를 다시 묻게 된다
+  const d = kv.get(TOKEN_KEY);
+  if (d) kv.set(TOKEN_KEY, { ...d, expiresAt: 0 });
   token = null;
   expiresAt = 0;
-  patch('auth', { signedIn: false, scopes: [] });
-  emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes: [], renewable: wasSignedIn() });
+  patch('auth', { signedIn: false });
+  emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes, renewable: wasSignedIn() });
 }
 
 /** 4단계에서 쓰기 권한이 필요해질 때. */

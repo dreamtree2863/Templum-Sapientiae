@@ -32,11 +32,40 @@ export async function renderSync() {
     </div>
     <div id="probe"></div>
     <p class="set-note">“전체 다시 훑기”는 Drive 를 처음부터 다시 셉니다.
-      목록이 오래돼 보이거나 새로 만든 자료가 안 보일 때 씁니다(9천여 개라 조금 걸립니다).</p>`;
+      목록이 오래돼 보이거나 새로 만든 자료가 안 보일 때 씁니다(9천여 개라 조금 걸립니다).</p>
+    <h3 class="set-sub">토큰 중계 (1시간 제한 해제)</h3>
+    <input id="broker-url" class="set-input" placeholder="웹 앱 URL (…/exec)" autocomplete="off"
+      value="${esc(auth.brokerCfg()?.url || '')}">
+    <input id="broker-key" class="set-input" type="password" placeholder="비밀 키" autocomplete="off"
+      value="${esc(auth.brokerCfg()?.key || '')}">
+    <div class="set-actions">
+      <button class="more-btn pressable" data-act="broker-save">저장하고 시험</button>
+      ${auth.brokerCfg() ? '<button class="more-btn pressable" data-act="broker-clear">해제</button>' : ''}
+    </div>
+    <p class="set-note">Apps Script 중계가 <b>읽기 전용</b> 토큰을 팝업 없이 받아 와, 1시간마다 다시 로그인할 필요가 없어집니다.
+      PC 로 기록을 보낼 때(쓰기)만 앱 로그인을 씁니다. 주소·키는 이 기기에만 저장됩니다.</p>`;
 
   el.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
+    if (b.dataset.act === 'broker-save') {
+      const url = el.querySelector('#broker-url').value.trim();
+      const key = el.querySelector('#broker-key').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) { shell.toast('웹 앱 URL 형식이 아닙니다(…/exec)', 'error'); return; }
+      if (!key) { shell.toast('비밀 키를 입력하세요', 'error'); return; }
+      b.disabled = true; b.textContent = '시험 중…(5초쯤)';
+      try { await auth.setBroker(url, key); shell.toast('토큰 중계 연결됨 — 1시간 제한이 풀렸습니다', 'ok'); }
+      catch (err) { shell.toast('중계 실패: ' + err.message, 'error'); }
+      b.disabled = false; b.textContent = '저장하고 시험';
+      el.querySelector('#body').innerHTML = rowsHtml(await syncFacts());
+      return;
+    }
+    if (b.dataset.act === 'broker-clear') {
+      if (!confirm('토큰 중계를 해제할까요? 다시 1시간마다 터치로 갱신합니다.')) return;
+      auth.clearBroker(); shell.toast('해제했습니다');
+      el.querySelector('#body').innerHTML = rowsHtml(await syncFacts());
+      return;
+    }
     if (b.dataset.act === 'send') { await onSend(el, b); return; }
     if (b.dataset.act === 'probe') { await onProbe(el, b); return; }
     if (b.dataset.act === 'index') {
@@ -148,6 +177,14 @@ async function syncFacts() {
   return [
     ['연결', navigator.onLine ? (a.signedIn ? '로그인됨' : '로그인 안 됨') : '오프라인',
       navigator.onLine && a.signedIn ? 'good' : navigator.onLine ? 'warn' : 'off'],
+    (() => {
+      const b = auth.brokerStatus();
+      if (!b.configured) return ['토큰 중계', '설정 안 됨 — 1시간마다 터치로 갱신', 'off'];
+      if (b.error && !b.fresh) return ['토큰 중계', '실패 · ' + b.error, 'warn'];
+      return ['토큰 중계', b.fresh ? `연결됨 · ${b.minutesLeft}분 남음(자동 갱신)` : '받는 중', b.fresh ? 'good' : 'warn'];
+    })(),
+    ['쓰기 로그인', auth.getWriteToken() ? '유효' : (auth.brokerStatus().writeWanted ? '만료 — 보낼 기록 대기' : '만료(보낼 때 갱신)'),
+      auth.getWriteToken() ? 'good' : auth.brokerStatus().writeWanted ? 'warn' : ''],
     ['마지막 확인', c.fetchedAt ? when(c.fetchedAt) : '아직 없음', c.fetchedAt ? '' : 'warn'],
     ['목록', (c.total || 0).toLocaleString() + '개', c.total ? '' : 'warn'],
     ['백지 인출', (counts.recall || 0) + '편', counts.recall ? '' : 'warn'],
