@@ -52,6 +52,31 @@ function store(tok, expiresIn, granted) {
   postTokenToSW();
   emit(EVENTS.AUTH_CHANGED, { signedIn: true, scopes });
   if (!kv.get(EMAIL_KEY)) rememberEmail(tok);
+  syncBrokerFromDrive(tok);   // 내 Drive 의 templum_broker.json → 중계 자동 설정·키 교체 반영
+}
+
+/** 내 Drive 최상위의 templum_broker.json({url,key}) — Apps Script setup() 이 쓴다.
+ *  앱 로그인 토큰(drive.readonly)으로 읽어 중계를 스스로 설정한다. 폰에서 입력할 것이 없고,
+ *  키를 바꾸면 다음 로그인 때 따라온다. 본인 계정으로만 읽히므로 공개 저장소와 무관하다.
+ *  (설치형 PWA 와 크롬 탭의 저장 공간이 분리된 기기가 있어, 링크·QR 방식으로는 앱에 안 들어갔다) */
+const BROKER_FILE = 'templum_broker.json';
+async function syncBrokerFromDrive(tok) {
+  try {
+    const q = encodeURIComponent(`name='${BROKER_FILE}' and trashed=false`);
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=modifiedTime desc&pageSize=1&fields=files(id)`,
+      { headers: { Authorization: 'Bearer ' + tok }, cache: 'no-store' });
+    const f = r.ok ? ((await r.json()).files || [])[0] : null;
+    if (!f) return;
+    const r2 = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+      { headers: { Authorization: 'Bearer ' + tok }, cache: 'no-store' });
+    const c = r2.ok ? await r2.json().catch(() => null) : null;
+    if (!c || !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(c.url || '') || !c.key) return;
+    const cur = brokerCfg();
+    if (cur && cur.url === c.url && cur.key === c.key && !brokerBad) return;
+    saveBrokerCfg(c.url, c.key);
+    await refreshBroker();
+    emit(EVENTS.TOAST, { text: cur ? '토큰 중계 키를 새로 받았습니다' : '토큰 중계를 자동으로 설정했습니다 — 1시간 제한이 풀립니다', kind: 'ok' });
+  } catch (e) { /* 파일이 없거나 오프라인 — 다음 로그인 때 다시 */ }
 }
 
 /* ── 토큰 중계(Google Apps Script, 2026-10-01) — 1시간 제한 해제 ─────────
@@ -67,6 +92,7 @@ let brokerExp = 0;
 let brokerTimer = null;
 let brokerBusy = null;
 let writeWanted = false;
+let brokerBad = false;   // 중계가 키를 거절(키 교체됨) → 다음 터치에서 로그인 갱신 → Drive 설정 파일에서 새 키
 
 export const brokerCfg = () => { const b = kv.get(BROKER_KEY); return (b && b.url && b.key) ? b : null; };
 const brokerFresh = () => !!brokerTok && Date.now() < brokerExp;
@@ -90,6 +116,7 @@ export function refreshBroker() {
       if (!d.token) throw new Error(d.error === 'forbidden' ? '키가 맞지 않습니다' : (d.error || '중계 응답 ' + r.status));
       brokerTok = d.token;
       brokerExp = Date.now() + (Number(d.expires_in) || 3000) * 1000 - 60_000;
+      brokerBad = false;
       kv.set(BROKER_TOK, { t: brokerTok, exp: brokerExp });
       kv.set('auth.brokerErr', '');
       patch('auth', { signedIn: true });
@@ -99,6 +126,7 @@ export function refreshBroker() {
       return brokerTok;
     } catch (e) {
       kv.set('auth.brokerErr', String(e.message || e));
+      if (/키가 맞지 않/.test(e.message || '')) brokerBad = true;
       scheduleBroker(60_000);
       throw e;
     } finally { brokerBusy = null; }
@@ -154,7 +182,7 @@ function withHint(opts) {
 export const wasSignedIn = () => !!kv.get(EVER_KEY);
 // 중계가 있으면 앱 로그인은 '보낼 것'이 있을 때만 갱신한다(1시간마다 팝업을 띄우지 않게)
 export const needsRenew = () => wasSignedIn() && (!token || expiresAt - Date.now() < RENEW_AHEAD_MS)
-  && (!brokerCfg() || writeWanted);
+  && (!brokerCfg() || writeWanted || brokerBad);
 
 /** 터치 순간에 부른다(팝업 허용). 토큰이 없거나 곧 만료되면 조용히 갱신. */
 export function renew() {
@@ -242,6 +270,7 @@ export async function init({ scope = SCOPE_READ } = {}) {
   // 중계가 있는데 읽기 토큰이 없으면 팝업 없이 받아 온다(~5초). 실패해도 기동은 계속.
   if (brokerCfg() && !brokerFresh()) { try { await refreshBroker(); } catch (e) { log.warn('auth', '토큰 중계 실패', e); } }
   else if (brokerCfg()) scheduleBroker();
+  if (writeFresh()) syncBrokerFromDrive(token);
   if (getToken()) {
     patch('auth', { signedIn: true, scopes });
     postTokenToSW();
