@@ -19,6 +19,9 @@ export function configure({ getToken, onUnauthorized }) {
   if (onUnauthorized) _onUnauthorized = onUnauthorized;
 }
 
+/** 지금 Drive 를 부를 토큰이 있는가 — 없으면 부르지 않는 편이 낫다(빈 토큰 → 401 → "만료" 오보). */
+export const hasToken = () => !!_getToken();
+
 /**
  * Drive 는 일시적으로 500/502/503 이나 429(속도제한)를 준다.
  * 지수 백오프로 최대 4회 재시도 — 한 번의 일시 오류로 동기화가 깨지지 않게.
@@ -27,6 +30,15 @@ export function configure({ getToken, onUnauthorized }) {
 export async function driveFetch(path, params) {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+  /* ‼ 토큰이 아예 없으면 나가지 않는다. 로그인한 적도 없는데 빈 토큰으로 401 을 받아
+     "토큰 만료 — 자동 재로그인 시도 중"이 빨갛게 뜨던 것(첫 실행 화면에서 실측). */
+  if (!_getToken()) {
+    _onUnauthorized();
+    const e = new Error('로그인이 필요합니다 — 연결되면 자료를 받아옵니다.');
+    e.needAuth = true;
+    throw e;
+  }
 
   let lastErr;
   for (let attempt = 0; attempt < 4; attempt++) {

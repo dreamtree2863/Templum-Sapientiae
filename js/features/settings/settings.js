@@ -12,6 +12,7 @@ import * as kv from '../../core/kv.js';
 import { auth, catalog, classify, log, outbox, uplink, search, searchIndex, refresh, storageInfo } from '../../data/index.js';
 import { applyThemeAll, applyScaleAll } from '../viewer/viewer.js';
 import { checkUpdate, runningVersion } from '../update.js';
+import { EXAM_KEY, examInfo } from '../home.js';
 
 const esc = shell.escapeHtml;
 const SCALES = [0.9, 1, 1.15, 1.3];
@@ -23,7 +24,7 @@ export async function renderSync() {
   el.innerHTML = `<div class="rows" id="body">${rowsHtml(await syncFacts())}</div>
     <div id="queue">${queueHtml(await outbox.pending())}</div>
     <div class="set-actions">
-      <button class="more-btn pressable" data-act="refresh">목록 새로고침</button>
+      <button class="more-btn primary pressable" data-act="refresh">목록 새로고침</button>
       <button class="more-btn pressable" data-act="rescan">전체 다시 훑기</button>
       <button class="more-btn pressable" data-act="send">지금 PC 로 보내기</button>
       <button class="more-btn pressable" data-act="probe">폰 → PC 연결 시험</button>
@@ -280,16 +281,40 @@ export function renderDisplay() {
       ${SCALES.map(s => `<button class="seg-b${ui.textScale === s ? ' on' : ''}" data-scale="${s}">
         ${Math.round(s * 100)}%</button>`).join('')}
     </div></div>
-    <p class="set-note">문서 안에서도 하단 툴바로 바꿀 수 있습니다. 여기서 정한 값이 기본입니다.</p>`;
+    <p class="set-note">문서 안에서도 하단 툴바로 바꿀 수 있습니다. 여기서 정한 값이 기본입니다.</p>
+    <div class="set-group"><h3>시험일 (D-day)</h3>
+      <input id="exam-name" class="set-input" placeholder="시험 이름 (예: 외교관후보자 2차)" autocomplete="off"
+             value="${esc(examInfo()?.name || '')}">
+      <input id="exam-date" class="set-input" type="date" value="${esc(examInfo()?.date || '')}">
+      <div class="set-actions">
+        <button class="more-btn primary pressable" data-act="exam-save">시험일 저장</button>
+        ${examInfo() ? `<button class="more-btn pressable" data-act="exam-clear">지우기</button>` : ''}
+      </div>
+    </div>
+    <p class="set-note">홈 맨 위에 남은 날을 띄웁니다. 이 기기에만 저장됩니다.</p>`;
 
   el.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'exam-save') {
+      const date = el.querySelector('#exam-date').value;
+      if (!date) { shell.toast('날짜를 골라 주세요'); return; }
+      kv.set(EXAM_KEY, { name: el.querySelector('#exam-name').value.trim(), date });
+      shell.toast('시험일을 저장했습니다', 'ok');
+      router.go('#/settings/display', { replace: true });
+      return;
+    }
+    if (act === 'exam-clear') {
+      kv.del(EXAM_KEY);
+      router.go('#/settings/display', { replace: true });
+      return;
+    }
     const t = e.target.closest('[data-theme]');
     if (t) { applyThemeAll(t.dataset.theme); mark(el, '[data-theme]', t); return; }
     const s = e.target.closest('[data-scale]');
     if (s) { applyScaleAll(Number(s.dataset.scale)); mark(el, '[data-scale]', s); }
   });
 
-  shell.render({ title: '테마 · 글자 크기', back: true, node: el });
+  shell.render({ title: '표시 · 시험일', back: true, node: el });
 }
 
 function mark(el, sel, on) {
@@ -308,8 +333,10 @@ export function renderAi() {
              autocomplete="off" value="${search.hasKey() ? '••••••••••••' : ''}">
     </div>
     <div class="set-group"><h3>모델</h3>
-      <input type="text" id="model" class="set-input" placeholder="gemini-2.5-flash"
-             autocomplete="off" value="${esc(search.getModel())}">
+      <input type="text" id="model" class="set-input" placeholder="${esc(search.DEFAULT_MODEL)}"
+             autocomplete="off" list="model-choices" value="${esc(search.getModel())}">
+      <datalist id="model-choices">${search.MODEL_CHOICES.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+      <p class="set-note">비워 두면 기본값(${esc(search.DEFAULT_MODEL)})을 씁니다.</p>
     </div>
     <div class="set-actions">
       <button class="more-btn pressable" data-act="save">저장</button>
@@ -331,7 +358,7 @@ export function renderAi() {
     const k = el.querySelector('#key').value.trim();
     if (k && !/^[•]+$/.test(k)) search.setKey(k);
     const m = el.querySelector('#model').value.trim();
-    search.setModel(m);
+    search.setModel(m === search.DEFAULT_MODEL ? '' : m);   // 기본값은 저장하지 않는다 — 다음에 기본값이 올라가면 따라가게
     shell.toast('저장했습니다', 'ok');
   });
 

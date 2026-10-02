@@ -81,6 +81,10 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', '맑은 고딕', sans-serif;
   font-size: 16px;
   line-height: 1.6;
+  /* 한국어는 낱말 중간에서 줄을 바꾸지 않는다("단원"이 "단 / 원"으로 갈리던 것).
+     띄어쓰기 없는 긴 이름만 마지막 수단으로 끊는다. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior-y: contain;
 }

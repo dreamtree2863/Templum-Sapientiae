@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v42';   // v38 뉴스 요약 최신순 · v39 새 날짜 폴더를 증분으로 · v40 토큰 만료 = 터치로 갱신(로그아웃 방지) · v41 토큰 중계(1시간 제한 해제) · v42 Drive 설정 파일로 중계 자동 설정
+const SHELL_CACHE = 'templum-shell-v43';   // v40 토큰 만료 = 터치로 갱신 · v41 토큰 중계 · v42 Drive 설정 파일로 중계 자동 설정 · v43 남의 캐시 안 지움·홈 '오늘'·뒤로가기 한 번만 그림·목록 위치 복원
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
@@ -61,7 +61,10 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
-      keys.filter(k => k !== SHELL_CACHE && k !== DOC_CACHE && k !== AUTH_CACHE).map(k => caches.delete(k))
+      /* ‼ 캐시 저장소는 **출처 단위**다(dreamtree2863.github.io). 같은 출처의 음악 앱(ta-*) 캐시도
+         여기 보인다. 옛 코드는 "내 것이 아니면 전부" 지워, 두 앱이 갱신될 때마다 서로의
+         오프라인 문서·토큰을 날렸다. 내 접두어(templum-)만 정리한다. */
+      keys.filter(k => k.startsWith('templum-') && k !== SHELL_CACHE && k !== DOC_CACHE && k !== AUTH_CACHE).map(k => caches.delete(k))
     ))
   );
   self.clients.claim();

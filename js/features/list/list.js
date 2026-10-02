@@ -18,10 +18,12 @@ const PAGE = 60;                       // 한 번에 그리는 줄 수 (폰에�
 let q = { root: '', kind: '', l1: '', l2: '', text: '' };
 let shown = PAGE;
 let unsub = null;
+const memo = new Map();   // 해시 → {q, shown} — 문서에서 뒤로 오면 찾기·칩·펼친 줄을 되살린다
 
 export function renderList(params = {}) {
-  q = { root: params.root || '', kind: params.kind || '', l1: '', l2: '', text: '' };
-  shown = PAGE;
+  const back = router.isPop() && memo.get(location.hash);
+  q = back ? { ...back.q } : { root: params.root || '', kind: params.kind || '', l1: '', l2: '', text: '' };
+  shown = back ? back.shown : PAGE;
 
   const el = document.createElement('div');
   el.innerHTML = `
@@ -36,9 +38,10 @@ export function renderList(params = {}) {
   shell.render({ title: titleOf(q), back: true, node: el });
 
   const $q = el.querySelector('#q');
+  $q.value = q.text;
   $q.addEventListener('input', () => { q.text = $q.value.trim(); shown = PAGE; paint(el); });
   el.addEventListener('click', (e) => onClick(e, el));
-  if (params.focus === 'search') setTimeout(() => $q.focus(), 60);
+  if (params.focus === 'search' && !back) setTimeout(() => $q.focus(), 60);
 
   unsub?.();
   unsub = subscribe('catalog', () => paint(el));
@@ -144,6 +147,7 @@ function rowHtml({ f, seg }) {
 
 /* ── 손가락 ───────────────────────────────────────────────────────── */
 function onClick(e, el) {
+  memo.set(location.hash, { q: { ...q }, shown });
   const go = e.target.closest('[data-go]');
   if (go) { router.go(go.dataset.go); return; }
 

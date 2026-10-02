@@ -52,10 +52,14 @@ function rootPath(r) {
 
 let state = { path: '', text: '', shown: PAGE };
 let unsub = null;
+/* 해시 → 떠날 때의 찾기 글자·펼친 줄 수. 문서에서 뒤로 오면 그대로 되살린다
+   ('더 보기'로 펼친 줄이 접히면 스크롤 위치도 되돌릴 수 없다). */
+const memo = new Map();
 
 export function renderBrowse(params = {}) {
   const r = ROOTS[params.root || ''];
-  state = { path: params.p || (r ? rootPath(r) : 'archive'), text: '', shown: PAGE };
+  const back = router.isPop() && memo.get(location.hash);
+  state = back ? { ...back } : { path: params.p || (r ? rootPath(r) : 'archive'), text: '', shown: PAGE };
 
   const el = document.createElement('div');
   el.innerHTML = `
@@ -66,6 +70,7 @@ export function renderBrowse(params = {}) {
     <div id="body"></div>`;
 
   const $q = el.querySelector('#q');
+  $q.value = state.text;
   $q.addEventListener('input', () => { state.text = $q.value.trim(); state.shown = PAGE; paint(el); });
   el.addEventListener('click', (e) => onClick(e, el));
 
@@ -285,6 +290,7 @@ function searchHtml() {
 /* ── 손가락 ───────────────────────────────────────────────────────── */
 
 function onClick(e, el) {
+  memo.set(location.hash, { ...state });          // 어디로 가든 이 화면의 상태를 남긴다
   const dir = e.target.closest('[data-dir]');
   if (dir) {
     // 한 단 내려갈 때마다 히스토리를 쌓는다 — 뒤로가기가 한 단씩 올라오게

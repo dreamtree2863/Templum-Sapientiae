@@ -299,6 +299,7 @@ async function applyChanges(entries) {
  */
 export async function refresh({ force = false, onProgress } = {}) {
   if (busy) return { skipped: true };
+  if (!api.hasToken()) return { skipped: true, reason: 'signed-out' };   // 로그인 안내는 셸 배너가 한다
   busy = true;
   patch('catalog', { loading: true });
   try {

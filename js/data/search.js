@@ -19,10 +19,18 @@ import * as log from '../core/log.js';
 
 const KEY_LS = 'ai.key';
 const MODEL_LS = 'ai.model';
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_MODEL = 'gemini-3.8-flash';
+/* 옛 기본값들 — 설정 화면이 기본값을 입력칸에 채워 저장해 버려서, 기본값을 올려도
+   기기에 옛 이름이 남아 있었다. 이 이름이면 사용자가 고른 것이 아니라 옛 기본값으로 본다. */
+const OLD_DEFAULTS = ['gemini-2.5-flash'];
+/* 설정 화면의 고르기 목록(2026-10 API 목록 기준). 손으로 다른 이름을 넣어도 된다. */
+export const MODEL_CHOICES = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
 
 export const hasKey = () => !!kv.get(KEY_LS);
-export const getModel = () => kv.get(MODEL_LS) || DEFAULT_MODEL;
+export const getModel = () => {
+  const m = kv.get(MODEL_LS);
+  return (m && !OLD_DEFAULTS.includes(m)) ? m : DEFAULT_MODEL;
+};
 export function setKey(k) { if (k) kv.set(KEY_LS, String(k).trim()); else kv.del(KEY_LS); }
 export function setModel(m) { if (m) kv.set(MODEL_LS, String(m).trim()); else kv.del(MODEL_LS); }
 
@@ -236,11 +244,12 @@ function prompt(query, context) {
 export async function ask(query, context) {
   const key = kv.get(KEY_LS);
   if (!key) { const e = new Error('AI 키가 없습니다'); e.needKey = true; throw e; }
+  // ‼ 키는 주소(?key=)가 아니라 헤더로 — 주소는 기록·프록시 로그에 남는다
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
-    + encodeURIComponent(getModel()) + ':generateContent?key=' + encodeURIComponent(key);
+    + encodeURIComponent(getModel()) + ':generateContent';
   const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt(query, context) }] }] }),
   });
   if (!resp.ok) {
