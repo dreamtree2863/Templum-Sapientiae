@@ -19,6 +19,7 @@ import * as update from './features/update.js';
 import * as reviewUi from './features/review/review.js';
 import * as mcqUi from './features/mcq/mcq.js';
 import * as aiUi from './features/ai/ai.js';
+import * as writeUi from './features/write/write.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -60,12 +61,15 @@ function routes() {
   router.route('#/lib/ai', () => aiUi.renderAi());
 
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
+  // 답안·목차 쓰기 — #/write/<문제 id>?mode=answer|toc
+  router.route('#/write/:id', ({ id }) => writeUi.open(id, router.query()));
 
   router.setNotFound(() => router.go('#/', { replace: true }));
 
   // 문서에서 다른 곳으로 가면 프레임을 확실히 버린다(메모리·히스토리)
   window.addEventListener('hashchange', () => {
     if (!location.hash.startsWith('#/doc/')) viewer.close();
+    if (!location.hash.startsWith('#/write/')) writeUi.close();
   });
 }
 

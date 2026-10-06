@@ -1,0 +1,118 @@
+/* write.css — 답안·목차 쓰기 화면 (features/write) + 공용 편집기(vendor/rich_answer.js) 모양.
+ *
+ *  편집기 규칙(.ra-*, .rich-answer)은 데스크톱 index.html 의 것과 같다 — 폰에 맞게 손가락 크기만 키웠다.
+ */
+
+/* 쓰는 동안 하단 탭바를 치운다 — 자판이 올라오면 화면이 좁다 */
+body.writing #tabbar { display: none; }
+body.writing #main { padding: 0; }
+
+.write-wrap {
+  position: fixed; left: 0; right: 0;
+  top: calc(var(--topbar-h) + var(--safe-t)); bottom: 0;
+  display: flex; flex-direction: column;
+  background: var(--surface);
+}
+.write-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 10px; border-bottom: 1px solid var(--rule); background: var(--surface-2);
+  font-size: 13px;
+}
+.write-mode { font-weight: 700; color: var(--navy); }
+.write-bar select { font-size: 13px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
+.write-clock { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ink-2); }
+.write-clock.near { color: var(--warn); }
+.write-clock.over { color: var(--bad); }
+.write-count { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.write-count.ok { color: var(--ok); font-weight: 700; }
+.write-count.over { color: var(--warn); font-weight: 700; }
+
+.write-problem { flex: 0 0 auto; border-bottom: 2px solid var(--gold); background: var(--surface); }
+.write-prob-toggle {
+  width: 100%; border: 0; background: var(--surface-2); color: var(--ink-2);
+  font-size: 12.5px; padding: 5px; text-align: center; cursor: pointer; font-family: inherit;
+}
+.write-prob-body { height: 34vh; }
+.write-problem.folded .write-prob-body { display: none; }
+.write-prob-body iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--surface); }
+
+.write-editor-host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.write-editor {
+  flex: 1 1 auto; overflow: auto; padding: 12px 14px; outline: none;
+  font-size: 16px; line-height: 1.7; color: var(--ink); background: var(--surface);
+  -webkit-user-select: text; user-select: text;
+}
+
+.write-actions {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px calc(8px + var(--safe-b));
+  border-top: 1px solid var(--rule); background: var(--surface-2);
+}
+.write-saved { flex: 1; font-size: 12px; color: var(--ink-3); }
+.write-actions select { font-size: 13px; padding: 6px; border-radius: 8px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
+.btn-primary {
+  border: 0; border-radius: 10px; padding: 10px 16px; min-height: var(--tap);
+  background: var(--navy); color: #fff; font-weight: 700; font-size: 14px; font-family: inherit;
+}
+.btn-primary:disabled { opacity: .5; }
+
+/* 채점 결과 — 편집기 위에 뜨는 시트 */
+.write-result {
+  position: absolute; left: 0; right: 0;
+  top: 0; bottom: calc(56px + var(--safe-b));
+  overflow: auto; z-index: 20; padding: 12px 14px 24px;
+  background: var(--bg); border-top: 3px solid var(--gold);
+}
+.wr-head { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; font-size: 13px; color: var(--ink-2); }
+.wr-score { font-size: 40px; font-weight: 800; min-width: 92px; text-align: center; }
+.wr-score.ok { color: var(--ok); } .wr-score.mid { color: var(--warn); } .wr-score.low { color: var(--bad); }
+.wr-summary { margin-top: 4px; color: var(--ink); line-height: 1.55; }
+.wr-q { margin: 14px 0 6px; color: var(--navy); font-size: 14px; }
+.wr-pts { color: var(--ink-3); font-weight: 400; font-size: 12px; }
+.wr-item { border: 1px solid var(--rule); border-radius: 10px; padding: 8px 10px; margin: 6px 0; font-size: 13.5px; line-height: 1.5; background: var(--surface); }
+.wr-item.v-yes { border-left: 4px solid var(--ok); }
+.wr-item.v-partial { border-left: 4px solid var(--warn); }
+.wr-item.v-no { border-left: 4px solid var(--bad); }
+.wr-v { font-weight: 700; }
+.wr-cat { color: var(--ink-3); font-size: 12px; }
+.wr-crit { margin-top: 2px; }
+.wr-sub { color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
+.wr-appeal { margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: #eef4fa; color: #1a3c5e; font-size: 12.5px; }
+.wr-appeal-btn { margin-top: 6px; border: 1px solid #c5d4e3; background: #f5f9fd; color: #1a3c5e; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-family: inherit; }
+.wr-group { margin: 4px 0 8px; }
+.wr-check { display: flex; gap: 8px; align-items: flex-start; padding: 6px 2px; font-size: 13.5px; line-height: 1.45; }
+.wr-check input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 1px; }
+.wr-check i { color: var(--ink-3); font-style: normal; font-size: 11.5px; }
+.wr-actions { display: flex; gap: 8px; margin-top: 16px; }
+.wr-actions button { flex: 1; min-height: var(--tap); border-radius: 10px; border: 1px solid var(--rule); background: var(--surface); font-size: 14px; font-family: inherit; color: var(--ink); }
+.wr-actions .btn-primary { color: #fff; border: 0; }
+
+/* ── 공용 편집기 (vendor/rich_answer.js) — 데스크톱 index.html 의 .ra-* 와 같은 규칙 ── */
+.rich-answer { white-space: pre-wrap; word-break: break-word; }
+.rich-answer:empty:before { content: attr(data-placeholder); color: var(--ink-3); pointer-events: none; }
+.rich-answer.ra-disabled { background: var(--surface-2); color: var(--ink-2); }
+.rich-answer img.ans-img { max-width: 100%; height: auto; display: inline-block; vertical-align: middle; border: 1px solid #d8cfc0; border-radius: 4px; margin: 4px 2px; }
+.rich-answer img.ra-img-selected { outline: 2px solid #1b6fb9; }
+.rich-answer table.ans-table { border-collapse: collapse; margin: 6px 0; white-space: normal; }
+.rich-answer table.ans-table th, .rich-answer table.ans-table td { border: 1px solid #9c9282; padding: 4px 8px; min-width: 52px; vertical-align: top; }
+.rich-answer table.ans-table th { background: #f2ede2; }
+.ra-toolbar {
+  display: flex; align-items: center; gap: 5px; padding: 6px 8px; flex-wrap: nowrap; overflow-x: auto;
+  border-bottom: 1px solid var(--rule); background: var(--surface-2); -webkit-overflow-scrolling: touch;
+}
+.ra-btn {
+  flex: 0 0 auto; background: #1b6fb9; color: #fff; border: 0; border-radius: 8px;
+  min-height: 36px; padding: 6px 11px; font-size: 13.5px; font-family: inherit; white-space: nowrap;
+}
+.ra-btn.ra-sub { background: var(--surface); color: var(--ink); border: 1px solid var(--rule); min-width: 36px; }
+.ra-sep { flex: 0 0 auto; width: 1px; height: 22px; background: var(--rule); margin: 0 2px; }
+.ra-nav { flex: 0 0 auto; font-size: 13px; padding: 6px; max-width: 140px; border: 1px solid var(--rule); border-radius: 8px; }
+.ra-hint { display: none; }       /* 폰은 좁다 — 단축키 안내 대신 단추 제목(길게 누르기)으로 */
+.ra-sym-pop {
+  position: fixed; left: 8px; right: 8px; top: 40%; z-index: 60;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow-lift);
+  padding: 10px; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 5px;
+}
+.ra-btn.ra-sym { background: var(--surface-2); color: var(--ink); border: 1px solid var(--rule); padding: 6px 0; font-size: 16px; min-height: 40px; }
+.ra-sym-hint { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.5; }
+.ra-resize-handle { position: absolute; width: 22px; height: 22px; background: #1b6fb9; border: 2px solid #fff; border-radius: 4px; z-index: 30; }
+.ra-size-label { position: absolute; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; padding: 1px 5px; border-radius: 3px; z-index: 30; }

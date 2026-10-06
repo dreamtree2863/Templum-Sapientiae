@@ -149,12 +149,15 @@ const HUBS = {
   },
   work: {
     title: '✍️ 학습지',
-    desc: '빈칸을 채우고 채점합니다. 답은 이 기기에 저장됩니다.',
+    desc: '빈칸을 채우고, 답안·목차를 쓰고 채점합니다. 쓰는 것은 이 기기에 저장됩니다.',
     tiles: [
       { ico: '📝', label: '백지 인출', sub: '과목 → 단원', go: '#/browse?root=recall', count: 'recall' },
       { ico: '🔁', label: '복기 퀴즈', sub: '과목 → 세트', go: '#/browse?root=quiz', count: 'quiz' },
       { ico: '▶️', label: '이어서 풀기', sub: '풀다 만 것', go: '#/work/resume' },
       { ico: '📄', label: '내 답안', sub: '쓴 것 · 보낼 것', go: '#/work/answers' },
+      // 학습지 너머 — 논술 답안(시험)과 목차 퀴즈. 문제를 고르면 쓰기 화면으로(features/write)
+      { ico: '🖋️', label: '답안 쓰기', sub: '시험처럼 — PC에서 채점', go: '#/lib/docs?kind=q_only&pick=answer' },
+      { ico: '📑', label: '목차 퀴즈', sub: '폰에서 바로 채점', go: '#/lib/docs?kind=q_only&pick=toc' },
     ],
   },
   review: {

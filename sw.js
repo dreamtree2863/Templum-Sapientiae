@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v43';   // v40 토큰 만료 = 터치로 갱신 · v41 토큰 중계 · v42 Drive 설정 파일로 중계 자동 설정 · v43 남의 캐시 안 지움·홈 '오늘'·뒤로가기 한 번만 그림·목록 위치 복원
+const SHELL_CACHE = 'templum-shell-v44';   // v44 답안 쓰기·목차 퀴즈(폰 채점·항변)   // v40 토큰 만료 = 터치로 갱신 · v41 토큰 중계 · v42 Drive 설정 파일로 중계 자동 설정 · v43 남의 캐시 안 지움·홈 '오늘'·뒤로가기 한 번만 그림·목록 위치 복원
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
@@ -28,7 +28,7 @@ const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Driv
    여기 빠진 파일이 있어도 한 번 방문하면 오프라인에서 열린다. */
 const SHELL_FILES = [
   './', './index.html', './manifest.webmanifest',
-  './css/base.css', './css/shell.css', './css/list.css', './css/viewer.css',
+  './css/base.css', './css/shell.css', './css/list.css', './css/viewer.css', './css/write.css',
   './js/main.js',
   './js/core/bus.js', './js/core/store.js', './js/core/router.js',
   './js/core/idb.js', './js/core/kv.js', './js/core/log.js',
@@ -45,6 +45,8 @@ const SHELL_FILES = [
   './js/features/tts/player.js', './js/features/tts/normalize.js',
   './js/features/settings/settings.js', './js/features/update.js',
   './js/features/review/review.js', './js/features/mcq/mcq.js', './js/features/ai/ai.js',
+  './js/features/write/write.js', './js/data/grade-toc.js',
+  './vendor/rich_answer.js', './vendor/sketch_pad.js', './vendor/graph_editor.js',
   './vendor/tts_player.js',
   './vendor/mathjax/es5/tex-mml-chtml.js',
 ];

@@ -240,6 +240,35 @@ function prompt(query, context) {
     + '=== 자료 ===\n' + context + '\n===========\n\n=== 질문 ===\n' + query;
 }
 
+/**
+ * JSON 으로만 답하게 한 호출(목차 채점 등). 실패·빈 답·깨진 JSON 은 예외.
+ * ‼ 키는 헤더로 — ask() 와 같다.
+ */
+export async function askJson(promptText, { maxOutputTokens = 8192 } = {}) {
+  const key = kv.get(KEY_LS);
+  if (!key) { const e = new Error('AI 키가 없습니다 — 설정 › AI 키에서 넣어 주세요'); e.needKey = true; throw e; }
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+    + encodeURIComponent(getModel()) + ':generateContent';
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens, responseMimeType: 'application/json' },
+    }),
+  });
+  if (!resp.ok) {
+    let detail = '';
+    try { detail = (await resp.json())?.error?.message || ''; } catch (e) { /* 본문 없음 */ }
+    throw new Error(`AI 응답 실패 (${resp.status})${detail ? ' — ' + detail : ''}`);
+  }
+  const d = await resp.json();
+  let text = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+  if (!text) throw new Error('AI 가 빈 답을 보냈습니다');
+  text = text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+  try { return JSON.parse(text); } catch (e) { throw new Error('AI 응답을 읽지 못했습니다: ' + text.slice(0, 120)); }
+}
+
 /** 근거를 물려 답을 받는다. 키가 없으면 그 사실을 알린다. */
 export async function ask(query, context) {
   const key = kv.get(KEY_LS);
