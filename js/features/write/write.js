@@ -167,12 +167,13 @@ export function close() {
 }
 
 /* 문제 — 목차·답안이 섞인 파일이면 .question 만 보인다(모범 답이 새지 않게) */
-async function loadProblem(frame, file) {
+async function loadProblem(frame, file, { whole = false } = {}) {
   const d = await docContent.fetchDoc(file);
   let html = await d.blob.text();
   const plan = docRules.planFor(file.path + '/' + file.name, d.head);
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  doc.querySelectorAll('.toc, .answer, .source-note, script').forEach(n => n.remove());
+  // 문제 칸은 모범 목차·답안을 가린다. 종합본 보기(whole)는 통째로.
+  doc.querySelectorAll(whole ? 'script' : '.toc, .answer, .source-note, script').forEach(n => n.remove());
   html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
   frame.addEventListener('load', () => {
@@ -337,6 +338,7 @@ function renderResult() {
         ${g.items.map((it, ii) => `<label class="wr-check"><input type="checkbox" data-g="${gi}" data-i="${ii}" ${it.checked ? 'checked' : ''}>
           <span>${esc(it.text)} <i>${esc(it.tag)}</i></span></label>`).join('')}</div>`).join('')}` : ''}
     <div class="wr-actions">
+      ${c.sib.combined ? '<button class="pressable" id="wr-combined">📖 종합본</button>' : ''}
       <button class="pressable" id="wr-again">✏️ 고쳐 쓰기</button>
       <button class="btn-primary pressable" id="wr-send">📤 PC로 보내기 (이력·복습)</button>
     </div>`;
@@ -346,7 +348,22 @@ function renderResult() {
     box.hidden = true; c.result = null; c.ed.focus();
   });
   box.querySelector('#wr-send').addEventListener('click', sendToc);
+  box.querySelector('#wr-combined')?.addEventListener('click', openCombined);
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* 📖 종합본 — 문제+목차+모범답안 전체를 결과 위에 띄워 내 목차와 견준다 */
+function openCombined() {
+  const c = cur;
+  if (!c?.sib.combined) return;
+  const sheet = document.createElement('div');
+  sheet.className = 'write-sheet';
+  sheet.innerHTML = `<div class="write-sheet-bar"><b>📖 종합본</b><button class="pressable" id="ws-close">닫기 ✕</button></div>
+    <iframe title="종합본"></iframe>`;
+  c.el.appendChild(sheet);
+  sheet.querySelector('#ws-close').addEventListener('click', () => sheet.remove());
+  loadProblem(sheet.querySelector('iframe'), c.sib.combined, { whole: true })
+    .catch(e => { shell.toast('종합본을 열지 못했습니다: ' + (e.message || e), 'error'); sheet.remove(); });
 }
 
 /* ⚖ 항변 — 그 논점 하나만 다시 본다(PC 의 목차 항변과 같은 규칙: 내 목차 원문에 근거가 있을 때만 바꾼다) */

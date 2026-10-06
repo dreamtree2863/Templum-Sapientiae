@@ -170,7 +170,8 @@
             if (sel && (e.key === 'Delete' || e.key === 'Backspace')) {
                 e.preventDefault();
                 const img = sel; deselect();
-                img.remove();
+                const fig = img.closest && img.closest('figure.ans-fig');
+                (fig && editor.contains(fig) ? fig : img).remove();      // 캡션 틀째로 지운다
                 onChange && onChange();
             }
         });
@@ -197,7 +198,36 @@
         window.addEventListener('pointerup', endDrag);
         window.addEventListener('pointercancel', endDrag);
 
-        return { deselect, place };
+        return { deselect, place, selected: () => sel };
+    }
+
+    // ── 그림 캡션 — 모든 그림(그림 파일·📈 그래프·🖍 도식·붙여넣기)을 <figure> 로 감싸고 아래에 캡션 줄 ──
+    //   채점기 _extract_inline_figures 가 <figcaption> 을 그림 설명으로 함께 읽는다.
+    const CAP_PH = '그림 설명(캡션) — 눌러서 입력';
+    const LONE_IMG = /^\s*<img\b[^>]*>\s*$/i;
+    function figureHtml(imgHtml, caption) {
+        return `<figure class="ans-fig">${imgHtml}<figcaption class="ans-cap" data-placeholder="${CAP_PH}">${escHtml(caption || '')}</figcaption></figure><br>`;
+    }
+    /** 이미 들어 있는 맨 그림을 캡션 틀로 감싼다 → 캡션 칸 */
+    function ensureFigure(img) {
+        let fig = img.closest('figure.ans-fig');
+        if (fig) return fig.querySelector('figcaption');
+        fig = document.createElement('figure');
+        fig.className = 'ans-fig';
+        img.parentNode.insertBefore(fig, img);
+        fig.appendChild(img);
+        const cap = document.createElement('figcaption');
+        cap.className = 'ans-cap';
+        cap.setAttribute('data-placeholder', CAP_PH);
+        fig.appendChild(cap);
+        return cap;
+    }
+    function focusEnd(node) {
+        try {
+            const r = document.createRange();
+            r.selectNodeContents(node); r.collapse(false);
+            const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        } catch (e) {}
     }
 
     function insertImageData(editor, adapter, dataUri, onChange, extraAttr) {
@@ -235,6 +265,11 @@
                 if (c.nodeType !== 1) continue;
                 const tag = c.tagName;
                 if (tag === 'BR') { out += '\n'; continue; }
+                if (tag === 'FIGCAPTION') {
+                    const t = (c.textContent || '').trim();
+                    if (t) out += ` (캡션: ${t})`;
+                    continue;
+                }
                 if (tag === 'IMG') {
                     const gm = c.getAttribute('data-ge-model');
                     out += gm ? graphSummary(gm) : (c.getAttribute('data-sketch') ? '[도식 그림]' : '[그림]');
@@ -450,6 +485,10 @@
         if (tools.has('sketch')) {
             sketchBtn = add(btn('🖍 도식', '자유 그림판 — 상자·화살표·직선·글자로 국제정치·법 도식을 그려 넣습니다 (그래프는 📈 그래프 그리기 · 넣은 그림을 더블클릭하면 다시 고칠 수 있습니다)'));
         }
+        let capBtn = null;
+        if (imgBtn || graphBtn || sketchBtn) {
+            capBtn = add(btn('🏷 캡션', '그림 아래 캡션(설명) 달기 — 그림을 한 번 누른 뒤 이 단추. 새로 넣는 그림에는 캡션 줄이 저절로 붙습니다', 'ra-sub'));
+        }
         if (tools.has('outline')) {
             add(sep());
             LEVELS.forEach((L, lv) => {
@@ -608,7 +647,8 @@
             },
             insertContent(s) {
                 s = s == null ? "" : String(s);
-                const html = looksHTML(s) ? s : textToHtml(s);
+                let html = looksHTML(s) ? s : textToHtml(s);
+                if (LONE_IMG.test(html)) html = figureHtml(html.trim(), '');   // 그림·그래프·도식 → 캡션 줄과 함께
                 el.focus();
                 let ok = false;
                 try { ok = document.execCommand('insertHTML', false, html); } catch (e) { ok = false; }
@@ -719,7 +759,31 @@
         });
 
         el.addEventListener('input', onChange);
-        attachResizer(host, el, onChange);
+        // 캡션 안에서 Enter = 캡션을 끝내고 그림 아래로 (캡션이 여러 줄로 쪼개지지 않게)
+        el.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+            const s = window.getSelection();
+            const cap = s && s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement)?.closest?.('figcaption');
+            if (!cap || !el.contains(cap)) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const fig = cap.closest('figure');
+            let after = fig.nextSibling;
+            if (!after || after.nodeName !== 'BR') { after = document.createElement('br'); fig.after(after); }
+            const r = document.createRange(); r.setStartAfter(after); r.collapse(true);
+            s.removeAllRanges(); s.addRange(r);
+        }, true);
+        const resizer = attachResizer(host, el, onChange);
+        capBtn?.addEventListener('click', () => {
+            if (!editable()) return;
+            const img = resizer.selected();
+            if (!img) { flash('캡션을 달 그림을 먼저 한 번 누르세요'); return; }
+            const cap = ensureFigure(img);
+            resizer.deselect();
+            el.focus();
+            focusEnd(cap);
+            onChange();
+        });
         return adapter;
     }
 

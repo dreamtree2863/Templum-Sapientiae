@@ -19,7 +19,7 @@
  *    올리면 받아둔 문서 본문이 전부 날아가 다시 받는다.
  */
 
-const SHELL_CACHE = 'templum-shell-v44';   // v44 답안 쓰기·목차 퀴즈(폰 채점·항변)   // v40 토큰 만료 = 터치로 갱신 · v41 토큰 중계 · v42 Drive 설정 파일로 중계 자동 설정 · v43 남의 캐시 안 지움·홈 '오늘'·뒤로가기 한 번만 그림·목록 위치 복원
+const SHELL_CACHE = 'templum-shell-v46';   // v46 목차 결과에서 종합본 · v45 그림 캡션   // v44 답안 쓰기·목차 퀴즈(폰 채점·항변)   // v40 토큰 만료 = 터치로 갱신 · v41 토큰 중계 · v42 Drive 설정 파일로 중계 자동 설정 · v43 남의 캐시 안 지움·홈 '오늘'·뒤로가기 한 번만 그림·목록 위치 복원
 const DOC_CACHE = 'templum-docs-v4';       // 형식 그대로 → 본문 재다운로드 없음
 const MTIME_HEADER = 'x-doc-mtime';   // 캐시에 새겨 두는 이름표(응답 쪽). 요청은 질의로 받는다
 const MTIME_PARAM = '__mtime';        // 앱이 붙여 보내는 질의 — Drive 로 나가기 전에 떼어 낸다
