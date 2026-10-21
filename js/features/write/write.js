@@ -283,7 +283,8 @@ async function sendAnswer() {
 async function runGrade() {
   const c = cur;
   if (!c?.ed || c.ed.isEmpty()) { shell.toast('목차가 비어 있습니다', 'error'); return; }
-  if (!search.hasKey()) { shell.toast('AI 키가 없습니다 — 설정 › AI 키', 'error'); router.go('#/settings/ai'); return; }
+  // ‼ AI 연결 확인을 맨 먼저 — 만료면 이 터치에서 갱신(뒤의 await 다음엔 팝업이 막힌다)
+  try { await search.ensureAi(); } catch (e) { shell.toast(e.message, 'error'); return; }
   const crit = c.el.querySelector('#w-crit')?.value || (c.sib.rubric ? 'rubric' : 'toc');
   const btn = c.el.querySelector('#w-grade');
   const status = c.el.querySelector('#w-saved');
@@ -373,6 +374,7 @@ async function appeal(qi, ii) {
   if (!it) return;
   const argument = prompt(`'${it.criterion}' 판정(${VERDICT[it.verdict][1]})에 항변합니다.\n내 목차의 어느 항목이 이 논점을 세운 것인지 적어 주세요(비워도 됩니다):`);
   if (argument === null) return;
+  try { await search.ensureAi(); } catch (e) { shell.toast(e.message, 'error'); return; }
   const rubItem = res.rubric?.questions?.[qi]?.items?.[ii] || {};
   const status = c.el.querySelector('#w-saved');
   status.textContent = '⚖ 다시 보는 중…';

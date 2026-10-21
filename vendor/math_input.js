@@ -279,7 +279,43 @@
    *    (그래서 tilde 는 자동 첨자와 겹쳐 쓸 수 없다 — t 는 첨자로 간다)
    */
   var DECOR = ['bar', 'hat', 'dot'];        /* 기호 뒤에 붙는 낱말 — 첫 글자부터 첨자보다 먼저 */
-  var FUNCS = ['ln', 'log', 'exp', 'min', 'max', 'lim', 'sin', 'cos', 'tan'];  /* 두 번째 글자부터 */
+  /* ‼ 'sf' 가 없으면 sf(k) 가 s_{f}(k) 로 들어가 **오답 처리**된다.
+     경제학 학습지 정답 상당수가 sf(k)·nf(k) 꼴이라 이게 빠지면 학습지를 못 쓴다. */
+  var FUNCS = ['ln', 'log', 'exp', 'min', 'max', 'lim', 'sin', 'cos', 'tan',
+               'sf', 'nf', 'af'];  /* 두 번째 글자부터 */
+
+  /* ───────────────── 그리스 문자를 영어 이름으로 ─────────────────
+   *  delta → δ · Delta → Δ.  ';d' 를 외우지 않아도 되게 한다.
+   *  ‼ 낱말로 등록해 두지 않으면 자동 첨자가 중간에서 쪼갠다(d_{e<a} 가 실제로 그랬다).
+   */
+  var GREEK_WORDS = {};
+  (function () {
+    var lower = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta',
+                 'theta', 'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi',
+                 'pi', 'rho', 'varrho', 'sigma', 'varsigma', 'tau', 'upsilon',
+                 'phi', 'varphi', 'chi', 'psi', 'omega'];
+    var upper = ['Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma',
+                 'Upsilon', 'Phi', 'Psi', 'Omega'];
+    lower.forEach(function (g) { GREEK_WORDS[g] = '\\' + g; });
+    upper.forEach(function (g) { GREEK_WORDS[g] = '\\' + g; });
+  })();
+  var GREEK_NAMES = Object.keys(GREEK_WORDS);
+
+  /* ───────────────── MP·AP 뒤 한 글자는 밑첨자 ─────────────────
+   *  MPK → MP_K · APL → AP_L.  '무엇에 대한 한계생산인가' 가 첨자이기 때문.
+   *  ‼ MPC·MPS(한계소비성향·한계저축성향)는 그 자체로 한 낱말이라 첨자로 보내지 않는다.
+   */
+  var SUB_STEM = { mp: 1, ap: 1, tp: 1, mrp: 1 };
+  var SUB_STEM_KEEP = { MPC: 1, MPS: 1, APC: 1, APS: 1 };
+  /** 어간이 되어 가는 중인가 — 2: 다 됨, 1: 아직 앞부분.
+   *  이게 없으면 AP 는 이어 줄 약자가 없어 두 글자째에서 끊긴다(MP 는 MPC·MPS 덕에 살아남았다). */
+  function stemish(cand) {
+    var c = String(cand || '').toLowerCase();
+    if (!c) return 0;
+    if (SUB_STEM[c]) return 2;
+    for (var key in SUB_STEM) if (key.indexOf(c) === 0) return 1;
+    return 0;
+  }
 
   /* ───────────────── 약자(略字) ─────────────────
    *  등록된 약자는 앞뒤에 다른 영문자가 없을 때 곧바로 대문자로 바뀐다 — nato → NATO.
@@ -287,7 +323,7 @@
    */
   var ABBR = {
     econ: ['MC', 'AC', 'TC', 'TVC', 'AVC', 'TFC', 'AFC', 'MR', 'AR', 'TR', 'MB', 'MAC',
-           'IS', 'LM', 'AD', 'AS', 'MPC', 'MPS', 'MPL', 'MPK', 'MRS', 'MRTS', 'MRP',
+           'IS', 'LM', 'AD', 'AS', 'MPC', 'MPS', 'MRS', 'MRTS',   /* MPK·MPL 은 MP_K·MP_L 로 */
            'GDP', 'GNP', 'CPI', 'PPP', 'IRP', 'UIP', 'CIP', 'NX', 'BP', 'LRAS', 'SRAS'],
     /* 국제법·국제정치학은 겹치는 약자가 많아 한 묶음으로 쓴다 */
     intl: ['VCLT', 'VCDR', 'VCCR', 'UN', 'UNCLOS', 'ILC', 'ICC', 'ITLOS', 'ICESCR', 'ICCPR',
@@ -302,6 +338,13 @@
   function wordish(cand, first, abbr) {
     var list = first ? DECOR : DECOR.concat(FUNCS);
     for (var i = 0; i < list.length; i++) if (list[i].indexOf(cand) === 0) return list[i] === cand ? 2 : 1;
+    /* 그리스 이름 — 다 치면 4(문자로 바꾼다), 아직이면 1(그대로 흘려보낸다) */
+    if (!first) {
+      if (GREEK_WORDS[cand]) return 4;
+      for (var g = 0; g < GREEK_NAMES.length; g++) {
+        if (GREEK_NAMES[g].indexOf(cand) === 0) return 1;
+      }
+    }
     if (abbr && abbr.length) {                       /* 약자는 대소문자 안 가리고 앞부분부터 */
       var up = cand.toUpperCase(), pre = 0;
       for (var j = 0; j < abbr.length; j++) {
@@ -316,6 +359,34 @@
   /* 직전 키가 이것이면 첨자로 보내지 않는다 — MathLive 의 getValue 는 여는 괄호를 빼고 주기 때문에
      'α(' 를 'α' 로 잘못 읽는다. 이름 있는 키(화살표·Backspace…) 뒤도 위치가 바뀐 뒤라 건드리지 않는다. */
   var NO_SUB_AFTER = /^(?:[([{|,]|.{2,})$/;
+
+  /** 다 친 그리스 이름을 그 문자로 바꾼다 (delta → \\delta). */
+  function greekize(mf, st) {
+    var run = st.pend, tex = run && GREEK_WORDS[run];
+    if (!tex) return;
+    try {
+      for (var i = 0; i < run.length; i++) mf.executeCommand('deleteBackward');
+      /* typedText 로 넣으면 역슬래시가 글자(ackslash)로 들어간다 — insert 여야 명령으로 해석된다 */
+      if (typeof mf.insert === 'function') mf.insert(tex, { focus: true });
+      else mf.executeCommand(['insert', tex]);
+    } catch (e) { return; }
+    st.pend = '';
+  }
+
+  /** MP·AP 뒤 한 글자를 밑첨자로 — MPK → MP_K. 넣었으면 true. */
+  function stemSub(mf, st, k) {
+    var stem = (st.pend || '').toLowerCase();
+    if (!SUB_STEM[stem] || !/^[A-Za-z]$/.test(k)) return false;
+    if (SUB_STEM_KEEP[(st.pend + k).toUpperCase()]) return false;
+    var up = st.pend.toUpperCase();
+    try {
+      for (var i = 0; i < st.pend.length; i++) mf.executeCommand('deleteBackward');
+      mf.executeCommand(['typedText', up]);
+      mf.executeCommand(['typedText', '_' + k.toUpperCase(), { simulateKeystroke: true }]);
+    } catch (e) { return false; }
+    st.pend = ''; st.just = true; st.inSub = true; st.ch = k;
+    return true;
+  }
 
   /** 등록된 약자면 방금 친 낱말을 대문자로 바꿔 놓는다. */
   function upperize(mf, st) {
@@ -490,10 +561,14 @@
 
     /* ① 이미 시작한 낱말·약자를 이어 간다 */
     if (st.pend) {
+      /* MP·AP 뒤 한 글자는 밑첨자 — 약자 판정보다 먼저 본다 */
+      if (st.sub && stemSub(mf, st, k)) { e.preventDefault(); e.stopPropagation(); return; }
+      if (st.sub && stemish(st.pend + k)) { st.pend = st.pend + k; return; }
       var wc = wordish(st.pend + k, false, st.abbr);
       if (wc) {
-        st.pend = (wc === 2) ? '' : st.pend + k;
+        st.pend = (wc === 4) ? st.pend + k : ((wc === 2) ? '' : st.pend + k);
         if (wc === 3) setTimeout(function () { upperize(mf, st); }, 0);
+        if (wc === 4) setTimeout(function () { greekize(mf, st); }, 0);
         return;
       }
     }
@@ -504,15 +579,24 @@
     function abbrStart() {
       return !!(st.abbr && st.abbr.length && !/[A-Za-z]$/.test(left) && wordish(k, false, st.abbr));
     }
-    if (!/^[a-z0-9]$/.test(k)) { st.pend = abbrStart() ? k : ''; return; }   /* 대문자는 첨자 대상 아님 */
+    /* 대문자는 첨자 대상이 아니지만, 약자나 **대문자 그리스 이름**(Delta)은 여기서 시작한다 */
+    function greekStart() {
+      if (/[A-Za-z]$/.test(left)) return false;
+      for (var g = 0; g < GREEK_NAMES.length; g++) if (GREEK_NAMES[g].indexOf(k) === 0) return true;
+      return false;
+    }
+    if (!/^[a-z0-9]$/.test(k)) {
+      var stemOK = st.sub && !/[A-Za-z]$/.test(left) && !!stemish(k);
+      st.pend = (abbrStart() || greekStart() || stemOK) ? k : ''; return;
+    }
 
     var go = st.sub && !!left && !st.inSub && !NO_SUB_AFTER.test(was || '')
       && (left.match(/\{/g) || []).length === (left.match(/\}/g) || []).length   /* 이미 첨자·분수 안이면 말고 */
       && !/[_^]$/.test(left)                                                     /* 방금 _ 를 쳤다 */
       && !/(?:\\(?:frac|sqrt|left|right|cdot|times|ln|log|exp|min|max|lim|sin|cos|tan)|[0-9])$/.test(left)
       && SYMBOL_END.test(left);
-    /* 그냥 쳤다 — 낱말·약자가 될 수 있는 글자만 기억해 둔다 */
-    if (!go) { st.pend = (wordish(k, false, null) || abbrStart()) ? k : ''; return; }
+    /* 그냥 쳤다 — 낱말·약자·그리스 이름이 될 수 있는 글자만 기억해 둔다 */
+    if (!go) { st.pend = (wordish(k, false, null) || abbrStart() || SUB_STEM[k.toLowerCase()]) ? k : ''; return; }
     e.preventDefault();
     e.stopPropagation();
     mf.executeCommand(['typedText', '_' + k, { simulateKeystroke: true }]);

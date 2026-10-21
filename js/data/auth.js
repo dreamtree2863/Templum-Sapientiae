@@ -26,6 +26,9 @@ const CLIENT_ID = '113629352800-he0vmc6f2m3f3vn5clr968db12sf6t4u.apps.googleuser
 export const SCOPE_READ = 'https://www.googleapis.com/auth/drive.readonly';
 /** 쓰기 — 4단계(폰→PC)에서 처음 켤 때만 더 요청한다. 앱이 만든 파일만 건드리는 비민감 스코프. */
 export const SCOPE_WRITE = 'https://www.googleapis.com/auth/drive.file';
+/** AI — Vertex AI(tts3 클라우드 크레딧)로 Gemini 를 부를 때만. 처음 AI 를 쓸 때 한 번 동의(2026-10-21).
+ *  AI Studio 키(선불 크레딧)는 소진(402)돼 더 쓰지 않는다. 계정 dreamtree2863 에 tts3 'Vertex AI 사용자' 역할이 있다. */
+export const SCOPE_CLOUD = 'https://www.googleapis.com/auth/cloud-platform';
 
 const TOKEN_KEY = 'auth.v2';          // {token, expiresAt, scopes[]}
 const EVER_KEY = 'auth.ever';         // 한 번이라도 로그인했는가 — 만료 ≠ 로그아웃
@@ -48,6 +51,7 @@ function store(tok, expiresIn, granted) {
   kv.set(EVER_KEY, true);
   renewing = false;
   writeWanted = false;
+  cloudWanted = false;
   patch('auth', { signedIn: true, scopes });
   postTokenToSW();
   emit(EVENTS.AUTH_CHANGED, { signedIn: true, scopes });
@@ -92,6 +96,7 @@ let brokerExp = 0;
 let brokerTimer = null;
 let brokerBusy = null;
 let writeWanted = false;
+let cloudWanted = false;   // AI 를 쓰려는데 앱 로그인 토큰이 만료 — 이번 터치에서 갱신
 let brokerBad = false;   // 중계가 키를 거절(키 교체됨) → 다음 터치에서 로그인 갱신 → Drive 설정 파일에서 새 키
 
 export const brokerCfg = () => { const b = kv.get(BROKER_KEY); return (b && b.url && b.key) ? b : null; };
@@ -182,7 +187,7 @@ function withHint(opts) {
 export const wasSignedIn = () => !!kv.get(EVER_KEY);
 // 중계가 있으면 앱 로그인은 '보낼 것'이 있을 때만 갱신한다(1시간마다 팝업을 띄우지 않게)
 export const needsRenew = () => wasSignedIn() && (!token || expiresAt - Date.now() < RENEW_AHEAD_MS)
-  && (!brokerCfg() || writeWanted || brokerBad);
+  && (!brokerCfg() || writeWanted || cloudWanted || brokerBad);
 
 /** 터치 순간에 부른다(팝업 허용). 토큰이 없거나 곧 만료되면 조용히 갱신. */
 export function renew() {
@@ -299,13 +304,16 @@ export async function init({ scope = SCOPE_READ } = {}) {
         // silent 실패는 조용히 — 사용자가 직접 누르게 둔다
         if (!silentTried) emit(EVENTS.TOAST, { text: '로그인 실패: ' + resp.error, kind: 'error' });
         silentTried = false;
+        wakeTokenWaiters();
         return;
       }
       store(resp.access_token, resp.expires_in, resp.scope);
+      wakeTokenWaiters();
     },
     // 팝업이 막히거나 닫힌 경우 — 콜백이 안 오므로 여기서 풀어 줘야 다음 터치에서 다시 시도한다
     error_callback: (err) => {
       renewing = false;
+      wakeTokenWaiters();
       if (!silentTried) emit(EVENTS.TOAST, { text: '로그인 창을 열지 못했습니다: ' + (err?.type || ''), kind: 'error' });
       silentTried = false;
     },
@@ -359,6 +367,45 @@ export function onUnauthorized() {
   expiresAt = 0;
   patch('auth', { signedIn: false });
   emit(EVENTS.AUTH_CHANGED, { signedIn: false, scopes, renewable: wasSignedIn() });
+}
+
+/* ── AI(Vertex) 토큰 ────────────────────────────────────────────────
+ *  AI 는 앱 로그인 토큰(cloud-platform 포함)으로 Vertex 를 부른다. 1시간이면 만료되므로
+ *  ‼ cloudToken() 은 **터치 처리 안에서, 다른 await 보다 먼저** 불러야 팝업이 막히지 않는다. */
+const cloudFresh = () => writeFresh() && scopes.includes(SCOPE_CLOUD);
+export const getCloudToken = () => (cloudFresh() ? token : null);
+export const hasCloud = () => scopes.includes(SCOPE_CLOUD);
+
+let tokWaiters = [];
+function wakeTokenWaiters() { const w = tokWaiters; tokWaiters = []; w.forEach(f => f()); }
+function waitForToken(ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { tokWaiters = tokWaiters.filter(f => f !== done); resolve(false); }, ms);
+    const done = () => { clearTimeout(t); resolve(true); };
+    tokWaiters.push(done);
+  });
+}
+
+/** AI 호출 직전. 신선한 토큰이면 바로, 아니면 (터치 중이므로) 갱신·동의를 열고 기다린다.
+ *  반환 토큰. 실패하면 예외(err.needCloud). */
+export async function cloudToken() {
+  if (cloudFresh()) return token;
+  if (!tokenClient) { const e = new Error('로그인 준비가 안 됐습니다 — 연결을 확인해 주세요'); e.needCloud = true; throw e; }
+  const waiting = waitForToken(90_000);
+  if (!hasCloud()) {
+    signIn({ scope: [SCOPE_READ, SCOPE_WRITE, SCOPE_CLOUD].join(' ') });   // 첫 사용 — 동의 화면
+  } else {
+    cloudWanted = true;
+    if (!renewing) {
+      renewing = true; silentTried = true;
+      try { tokenClient.requestAccessToken(withHint({ prompt: '' })); } catch (e) { renewing = false; }
+    }
+  }
+  await waiting;
+  if (cloudFresh()) return token;
+  const e = new Error(hasCloud() ? 'AI 연결이 끊겼습니다 — 한 번 더 눌러 주세요' : 'AI 사용 동의가 필요합니다 — 다시 눌러 동의해 주세요');
+  e.needCloud = true;
+  throw e;
 }
 
 /** 4단계에서 쓰기 권한이 필요해질 때. */

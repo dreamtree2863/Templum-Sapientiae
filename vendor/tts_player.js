@@ -51,6 +51,8 @@
         const leaves = all.filter(function (el) {
             // note(주석) div 는 html_to_text 가 낭독에서 빼므로 세그먼트에서도 제외(음성과 일치)
             if (el.closest && el.closest(".note")) return false;
+            // 각주 블록(class="footnotes")도 html_to_text 가 낭독에서 뺀다(2026-10-17) — 같은 기준으로 제외
+            if (el.closest && el.closest(".footnotes")) return false;
             for (const c of el.querySelectorAll(SEG_SEL)) { if (set.has(c)) return false; }
             return (el.textContent || "").trim().length > 0;
         });

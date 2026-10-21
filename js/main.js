@@ -20,6 +20,7 @@ import * as reviewUi from './features/review/review.js';
 import * as mcqUi from './features/mcq/mcq.js';
 import * as aiUi from './features/ai/ai.js';
 import * as writeUi from './features/write/write.js';
+import * as tutorUi from './features/tutor/tutor.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -59,6 +60,7 @@ function routes() {
   router.route('#/review/mcq', () => mcqUi.renderSets());
   router.route('#/review/wrong', () => mcqUi.renderWrong());
   router.route('#/lib/ai', () => aiUi.renderAi());
+  router.route('#/lib/tutor', () => tutorUi.renderTutor(router.query()));
 
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
   // 답안·목차 쓰기 — #/write/<문제 id>?mode=answer|toc
@@ -113,6 +115,8 @@ async function boot() {
 
   shell.mount(document.getElementById('app'));
   routes();
+  // 학습 챗봇을 떠나면 음성 대화는 끈다(숨은 마이크 방지)
+  window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/lib/tutor')) tutorUi.leave(); });
   update.registerSW();
 
   window.addEventListener('online', () => store.patch('ui', { online: true }));

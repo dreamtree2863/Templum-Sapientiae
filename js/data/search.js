@@ -16,17 +16,24 @@ import * as classify from './classify.js';
 import * as docContent from './doc-content.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
+import * as gemini from './gemini.js';
+import * as auth from './auth.js';
 
 const KEY_LS = 'ai.key';
 const MODEL_LS = 'ai.model';
-export const DEFAULT_MODEL = 'gemini-3.8-flash';
+export const DEFAULT_MODEL = gemini.FLASH;    // 데스크톱 ai_models.FLASH 와 같게(2026-10-21 Vertex 전환)
 /* 옛 기본값들 — 설정 화면이 기본값을 입력칸에 채워 저장해 버려서, 기본값을 올려도
    기기에 옛 이름이 남아 있었다. 이 이름이면 사용자가 고른 것이 아니라 옛 기본값으로 본다. */
-const OLD_DEFAULTS = ['gemini-2.5-flash'];
+const OLD_DEFAULTS = ['gemini-2.5-flash', 'gemini-3.8-flash'];
 /* 설정 화면의 고르기 목록(2026-10 API 목록 기준). 손으로 다른 이름을 넣어도 된다. */
-export const MODEL_CHOICES = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+export const MODEL_CHOICES = [gemini.FLASH, 'gemini-3.8-flash', gemini.LITE, gemini.PRO];
 
-export const hasKey = () => !!kv.get(KEY_LS);
+/* AI 는 이제 키가 아니라 앱 로그인(Vertex · tts3)으로 쓴다 — 키 확인은 늘 통과(옛 호출부 호환).
+   처음 쓸 때 동의 한 번, 만료되면 버튼을 누르는 순간 갱신(ensureAi). */
+export const hasKey = () => true;
+export const aiConnected = () => auth.hasCloud();
+/** AI 를 쓰는 버튼 처리기 **맨 앞**에서 부른다(다른 await 전에) — 만료면 터치 중에 갱신. */
+export const ensureAi = () => auth.cloudToken();
 export const getModel = () => {
   const m = kv.get(MODEL_LS);
   return (m && !OLD_DEFAULTS.includes(m)) ? m : DEFAULT_MODEL;
@@ -236,58 +243,21 @@ function prompt(query, context) {
   return '당신은 통합 학습 도우미입니다. 아래 자료에만 근거하여 한국어로 답변하세요.\n'
     + '각 자료 머리의 [출처: …] 표기를 활용해 답변 끝에 사용한 문서를 적으세요.\n'
     + "자료에 없는 내용은 추측하지 말고 '자료에서 찾을 수 없습니다.' 라고 답하세요.\n"
+    + '고유 사실(판례·사건명, 조약명·조문 번호, 연도, 학자·저서명, 수치, 인용문)은 자료에 있는 것만 쓰고, '
+    + '그럴듯한 이름·번호·연도를 지어내지 마세요. 용어·고유명사는 정확한 표기로 씁니다.\n'
     + '수식은 \\( … \\) 또는 \\[ … \\] 로 쓰세요.\n\n'
     + '=== 자료 ===\n' + context + '\n===========\n\n=== 질문 ===\n' + query;
 }
 
 /**
  * JSON 으로만 답하게 한 호출(목차 채점 등). 실패·빈 답·깨진 JSON 은 예외.
- * ‼ 키는 헤더로 — ask() 와 같다.
+ * Vertex(tts3) — gemini.js 가 토큰·대체 모델을 맡는다.
  */
 export async function askJson(promptText, { maxOutputTokens = 8192 } = {}) {
-  const key = kv.get(KEY_LS);
-  if (!key) { const e = new Error('AI 키가 없습니다 — 설정 › AI 키에서 넣어 주세요'); e.needKey = true; throw e; }
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
-    + encodeURIComponent(getModel()) + ':generateContent';
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: promptText }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens, responseMimeType: 'application/json' },
-    }),
-  });
-  if (!resp.ok) {
-    let detail = '';
-    try { detail = (await resp.json())?.error?.message || ''; } catch (e) { /* 본문 없음 */ }
-    throw new Error(`AI 응답 실패 (${resp.status})${detail ? ' — ' + detail : ''}`);
-  }
-  const d = await resp.json();
-  let text = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
-  if (!text) throw new Error('AI 가 빈 답을 보냈습니다');
-  text = text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-  try { return JSON.parse(text); } catch (e) { throw new Error('AI 응답을 읽지 못했습니다: ' + text.slice(0, 120)); }
+  return gemini.generateJson(promptText, { model: getModel(), maxOutputTokens });
 }
 
-/** 근거를 물려 답을 받는다. 키가 없으면 그 사실을 알린다. */
+/** 근거를 물려 답을 받는다. */
 export async function ask(query, context) {
-  const key = kv.get(KEY_LS);
-  if (!key) { const e = new Error('AI 키가 없습니다'); e.needKey = true; throw e; }
-  // ‼ 키는 주소(?key=)가 아니라 헤더로 — 주소는 기록·프록시 로그에 남는다
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/'
-    + encodeURIComponent(getModel()) + ':generateContent';
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt(query, context) }] }] }),
-  });
-  if (!resp.ok) {
-    let detail = '';
-    try { detail = (await resp.json())?.error?.message || ''; } catch (e) { /* 본문 없음 */ }
-    throw new Error(`AI 응답 실패 (${resp.status})${detail ? ' — ' + detail : ''}`);
-  }
-  const d = await resp.json();
-  const text = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
-  if (!text) throw new Error('AI 가 빈 답을 보냈습니다');
-  return text;
+  return gemini.generate(prompt(query, context), { model: getModel(), temperature: 0.3, maxOutputTokens: 4096 });
 }

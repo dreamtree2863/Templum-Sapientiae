@@ -145,6 +145,7 @@ const HUBS = {
       { ico: '📰', label: '뉴스 요약', sub: '시사', go: '#/lib/docs?kind=news' },
       { ico: '🔍', label: '검색', sub: '제목·경로', go: '#/lib/docs?focus=search' },
       { ico: '🤖', label: '문서 AI', sub: '자료에 물어보기', go: '#/lib/ai' },
+      { ico: '🎓', label: '학습 챗봇', sub: '묻기 · 퀴즈 · 암기 확인 · 🎙', go: '#/lib/tutor' },
     ],
   },
   work: {
@@ -168,6 +169,7 @@ const HUBS = {
       { ico: '🃏', label: '복습 카드', sub: '가진 카드', go: '#/review/today', count: 'cards', unit: '장', zero: '아직 없음' },
       { ico: '🔘', label: '객관식 시험', sub: '탭만으로', go: '#/review/mcq' },
       { ico: '❌', label: '오답 재시험', sub: '틀린 것만', go: '#/review/wrong' },
+      { ico: '🎓', label: '퀴즈 · 암기 확인', sub: '오늘 복습할 것으로', go: '#/lib/tutor?mode=quiz&scope=due' },
     ],
   },
   settings: {
@@ -177,7 +179,7 @@ const HUBS = {
       { ico: '🔄', label: '동기화 상태', sub: '', go: '#/settings/sync' },
       { ico: '💾', label: '저장 공간', sub: '', go: '#/settings/storage' },
       { ico: '🎨', label: '표시 · 시험일', sub: '테마 · 글자 · D-day', go: '#/settings/display' },
-      { ico: '🤖', label: 'AI 키', sub: '문서 AI 답변용', go: '#/settings/ai' },
+      { ico: '🤖', label: 'AI 연결', sub: 'Vertex · 모델', go: '#/settings/ai' },
       { ico: '📋', label: '기록', sub: '진단 로그', go: '#/settings/log' },
     ],
   },

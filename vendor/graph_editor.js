@@ -46,8 +46,38 @@
   /* 예전 이름 → 휨 값. 저장해 둔 그림을 그대로 열 수 있게 남겨 둔다. */
   var LEGACY = { line: 0, convex: -0.6, concave: 0.6, jshape: 0.6 };
 
-  /** 휨 k(-1~1) → 지수. k=0 이면 직선, 클수록 처음이 평평하고 끝이 가파르다. */
-  function expOf(k) { return Math.pow(3, clamp(k == null ? 0 : k, -1, 1)); }
+  /* 휨 k(-1~1) — 곡선은 *직각쌍곡선 조각* 이다: 정규화 좌표에서 (t+d)(1-f+d)=d(1+d).
+   *  거듭제곱 t^e 는 한쪽 끝에서만 확 꺾여 고르지 않다 — 쌍곡선은 가운데(꼭짓점)를
+   *  축으로 좌우 대칭이라 무차별곡선처럼 꾸준히 꺾인다.
+   *  k<0 체감(먼저 가파르고 갈수록 완만 — 우하향이면 원점에 볼록) · k>0 체증 · k=0 직선.
+   *  |k| 가 클수록 d 가 작아져 꼭짓점이 뾰족해진다(→1 이면 L자). */
+  var BEND_C = 0.45;
+  function bendD(k) {
+    var a = Math.abs(clamp(k == null ? 0 : k, -1, 1));
+    return a < 0.001 ? Infinity : Math.max(0.03, BEND_C * (1 / a - 1));
+  }
+  /** 0→0, 1→1 로 가는 휨 함수 f(t) */
+  function bendF(k, t) {
+    var d = bendD(k);
+    if (!isFinite(d)) return t;
+    return k < 0 ? (1 + d) * t / (t + d) : d * t / (1 + d - t);
+  }
+  /** 꼭짓점(가장 많이 꺾인 곳)의 정규화 좌표 [t, f] — 변형점 손잡이 자리 */
+  function bendVertex(k) {
+    var d = bendD(k);
+    if (!isFinite(d)) return [0.5, 0.5];
+    var ts = Math.sqrt(d * d + d) - d;
+    return k < 0 ? [ts, 1 - ts] : [1 - ts, ts];
+  }
+  /** 변형점을 (t,f) 로 끌었을 때의 k — 현(f=t)에서 벗어난 정도 m=f-t 로 정한다 */
+  function kFromVertex(t, f) {
+    var m = clamp(f - t, -0.94, 0.94);
+    if (Math.abs(m) < 0.012) return 0;
+    var ts = (1 - Math.abs(m)) / 2, d = ts * ts / Math.abs(m);
+    var a = 1 / (1 + d / BEND_C);
+    return Math.round((m > 0 ? -a : a) * 100) / 100;
+  }
+  var USHAPE_D0 = 18, USHAPE_DK = 14;               // U자 깊이 = 18 + 14k
 
   /** 가로 u 에서의 세로값 — 수직선만 함수가 아니라 null 을 준다. */
   function vAt(it, u) {
@@ -60,9 +90,9 @@
     if (it.shape === 'ushape') {                      // U자 — 가운데가 내려앉는다(깊이도 휨으로 조절)
       var s = 2 * t - 1;
       var lo = Math.min(p[1], q[1]), hi = Math.max(p[1], q[1]);
-      return lo + (hi - lo) * s * s - (1 - s * s) * (18 + 14 * clamp(k, -1, 1));
+      return lo + (hi - lo) * s * s - (1 - s * s) * (USHAPE_D0 + USHAPE_DK * clamp(k, -1, 1));
     }
-    return p[1] + (q[1] - p[1]) * Math.pow(t, expOf(k));
+    return p[1] + (q[1] - p[1]) * bendF(k, t);
   }
 
   /** 가로 범위 [u0,u1] — 수직선은 한 점. */
@@ -78,14 +108,29 @@
     if (it.shape === 'horiz') return [[p[0], p[1]], [q[0], p[1]]];
     var kk = (it.k == null) ? (LEGACY[it.shape] || 0) : it.k;
     if (it.shape !== 'ushape' && Math.abs(kk) < 0.001) return [[p[0], p[1]], [q[0], q[1]]];
-    // 휨이 셀수록 한쪽 끝이 가팔라 각져 보인다 → 표본을 늘리고 끝을 촘촘히 훑는다
-    n = n || Math.round(56 + 90 * Math.abs(kk));
-    for (i = 0; i <= n; i++) {
-      var t = i / n;
-      t = t * t * (3 - 2 * t);                       // 양 끝을 촘촘하게
-      u = p[0] + (q[0] - p[0]) * t;
-      out.push([u, vAt(it, u)]);
+    if (it.shape === 'ushape') {
+      n = n || 120;
+      for (i = 0; i <= n; i++) {
+        var t0 = i / n;
+        t0 = t0 * t0 * (3 - 2 * t0);                 // 양 끝을 촘촘하게
+        u = p[0] + (q[0] - p[0]) * t0;
+        out.push([u, vAt(it, u)]);
+      }
+      return out;
     }
+    // 쌍곡선은 꼭짓점 근처에서 꺾인다 → 가로가 아니라 *곡선 위 매개변수* 로 고르게 훑는다.
+    //   (t+d)(g+d)=d(1+d) 를 쌍곡선 매개 θ 로 걸으면 가파른 쪽·평평한 쪽 모두 촘촘하다.
+    var d = bendD(kk), r = Math.sqrt(d * (1 + d));
+    var th0 = Math.log(d / r), th1 = Math.log((1 + d) / r);   // t+d = r·e^θ, 0→1
+    n = n || 160;
+    for (i = 0; i <= n; i++) {
+      var tc = clamp(r * Math.exp(th0 + (th1 - th0) * (i / n)) - d, 0, 1);
+      var fc = (1 + d) * tc / (tc + d);              // 체감형 f
+      // 체증(k>0)은 체감형을 180° 돌린 것: t→1-t, f→1-f
+      var tt = kk < 0 ? tc : 1 - tc, ff = kk < 0 ? fc : 1 - fc;
+      out.push([p[0] + (q[0] - p[0]) * tt, p[1] + (q[1] - p[1]) * ff]);
+    }
+    if (kk > 0) out.reverse();
     return out;
   }
 
@@ -145,7 +190,7 @@
     var lo = lowest(ac);
     if (!lo) return;
     var t = (lo[0] - mc.p[0]) / (mc.q[0] - mc.p[0]);
-    var w = Math.pow(clamp(t, 0, 1), expOf(mc.k));
+    var w = bendF(mc.k, clamp(t, 0, 1));
     if (w >= 0.999) return;
     mc.p[1] = r1((lo[1] - mc.q[1] * w) / (1 - w));
   }
@@ -391,6 +436,12 @@
       var it = model.items.filter(function (x) { return x.id === opt.sel; })[0];
       if (it) {
         handlesOf(it).forEach(function (h) {
+          if (h.k === 'm') {          // 변형점 — 끝점(네모)과 구별되게 둥글게
+            s.push('<circle cx="' + r1(X(h.u)) + '" cy="' + r1(Y(h.v)) + '" r="6"'
+              + ' fill="#fdf0dc" stroke="#c0392b" stroke-width="1.8" data-handle="m"'
+              + ' data-id="' + it.id + '" style="cursor:grab"><title>끌어서 휨(곡률) 조절</title></circle>');
+            return;
+          }
           s.push('<rect x="' + r1(X(h.u) - 5) + '" y="' + r1(Y(h.v) - 5) + '" width="10" height="10"'
             + ' fill="#ffffff" stroke="#9a6a30" stroke-width="1.8" data-handle="' + h.k
             + '" data-id="' + it.id + '" style="cursor:pointer"/>');
@@ -403,10 +454,40 @@
 
   function handlesOf(it) {
     if (it.type === 'curve' || it.type === 'arrow') {
-      return [{ k: 'p', u: it.p[0], v: it.p[1] }, { k: 'q', u: it.q[0], v: it.q[1] }];
+      var hs = [{ k: 'p', u: it.p[0], v: it.p[1] }, { k: 'q', u: it.q[0], v: it.q[1] }];
+      var m = it.type === 'curve' ? midHandle(it) : null;
+      if (m) hs.push({ k: 'm', u: m[0], v: m[1] });
+      return hs;
     }
     if (it.type === 'point' || it.type === 'text') return [{ k: 'at', u: it.at[0], v: it.at[1] }];
     return [];
+  }
+
+  /** 변형점 자리 — 쌍곡선은 꼭짓점, U자는 최저점. 수직·수평선은 없음. */
+  function midHandle(it) {
+    if (it.shape === 'vert' || it.shape === 'horiz') return null;
+    if (it.shape === 'ushape') return lowest(it);
+    var k = (it.k == null) ? (LEGACY[it.shape] || 0) : it.k;
+    var tf = bendVertex(k);
+    return [it.p[0] + (it.q[0] - it.p[0]) * tf[0], it.p[1] + (it.q[1] - it.p[1]) * tf[1]];
+  }
+
+  /** 변형점을 (u,v) 로 끌었을 때 휨/깊이 k 를 정한다. */
+  function bendTo(it, u, v) {
+    if (it.shape === 'ushape') {             // 최저점 높이가 v 가 되는 깊이 — 깊이는 k 에 단조
+      var lo = -1, hi = 1, j;
+      for (j = 0; j < 24; j++) {
+        var mid = (lo + hi) / 2;
+        it.k = mid;
+        if (lowest(it)[1] > v) lo = mid; else hi = mid;
+      }
+      it.k = Math.round((lo + hi) / 2 * 100) / 100;
+      return;
+    }
+    var du = it.q[0] - it.p[0], dv = it.q[1] - it.p[1];
+    if (Math.abs(du) < 0.5 || Math.abs(dv) < 0.5) return;      // 거의 수직·수평이면 휠 수 없다
+    it.k = kFromVertex((u - it.p[0]) / du, (v - it.p[1]) / dv);
+    if (it.shape !== 'curve') it.shape = 'curve';             // 옛 모양 이름은 휨으로 통일
   }
 
   /* ───────────────── 모양새 ─────────────────
@@ -449,11 +530,22 @@
     + '.ge-row:hover{border-color:#c19a6b}'
     + '.ge-row.on{border-color:#9a6a30;background:#fdf7ee;font-weight:bold}'
     /* 학습지 안 대화상자 */
-    + '.ge-dlg{position:fixed;inset:0;z-index:9999;background:rgba(40,36,28,.45);display:flex;'
+    /* 막을 깔지 않는다 — 뒤의 발문을 읽고 스크롤하면서 그려야 하기 때문. */
+    + '.ge-dlg{position:fixed;inset:0;z-index:9999;display:flex;pointer-events:none;'
     + 'align-items:center;justify-content:center;padding:18px;font-family:"Malgun Gothic","맑은 고딕",sans-serif}'
-    + '.ge-dlg-box{background:#faf7f0;border-radius:10px;box-shadow:0 18px 50px rgba(30,24,10,.35);'
-    + 'padding:14px 16px 16px;width:min(1080px,96vw);max-height:94vh;overflow:auto}'
-    + '.ge-dlg-head{display:flex;align-items:center;gap:10px;font-size:14px;color:#414833}'
+    + '.ge-dlg-box{background:#faf7f0;border-radius:10px;border:1px solid #cdbfa4;'
+    + 'box-shadow:0 18px 50px rgba(30,24,10,.35);pointer-events:auto;'
+    /* 화면을 다 덮지 않는다 — 옆에 문제가 보여야 보면서 그릴 수 있다.
+       3단(210+본문+232)이 유지되는 하한이 대략 이 폭이다. */
+    + 'padding:14px 16px 16px;width:min(880px,94vw);max-height:88vh;overflow:auto}'
+    /* 끌어서 옮긴 뒤 — 가운데 정렬을 버리고 놓인 자리에 선다 */
+    + '.ge-dlg-box.ge-moved{position:fixed;margin:0}'
+    + '.ge-dlg-head{display:flex;align-items:center;gap:10px;font-size:14px;color:#414833;'
+    + 'cursor:move;user-select:none;-webkit-user-select:none;touch-action:none;'
+    + 'margin:-14px -16px 0;padding:10px 16px;border-bottom:1px solid #e6dcc8;'
+    + 'background:#f3ecdd;border-radius:10px 10px 0 0}'
+    + '.ge-dlg-head .ge-grip{color:#a89a80;letter-spacing:2px;flex:0 0 auto}'
+    + '.ge-dlg-head button{cursor:pointer}'
     + '.ge-dlg-label{color:#8a8778;font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '.ge-dlg-btns{display:flex;gap:6px;flex:0 0 auto}'
     + '.ge-dlg-btns .ge-mini{flex:0 0 auto;padding:6px 14px;font-size:12.5px}'
@@ -570,6 +662,7 @@
           h += '<div class="ge-khint">' + (kk > 0.03 ? '체증 — 갈수록 가팔라짐'
             : (kk < -0.03 ? '체감 — 갈수록 완만해짐' : '직선')) + '</div>';
         }
+        h += '<div class="ge-khint">곡선 위 <b style="color:#c0392b">●</b> 변형점을 끌어도 조절됩니다</div>';
       }
     } else if (it.type === 'point') {
       h += row('이름', '<input id="ge-label" value="' + esc(it.label || '') + '">');
@@ -612,6 +705,19 @@
     else { p = [12, 86]; q = [88, 14]; }
     var it = { id: nid('c'), type: 'curve', shape: shape, k: k || 0, p: p, q: q, label: '', dash: false };
     model.items.push(it); sel = it.id; draw();
+  }
+
+  /** 무차별곡선족 — 같은 휨으로 원점에서 멀어지는 세 곡선(서로 만나지 않는다). */
+  function addIndifferenceFamily() {
+    snap();
+    var last = null;
+    [[6, 70, 62, 8], [18, 82, 78, 20], [30, 94, 94, 32]].forEach(function (b, i) {
+      last = { id: nid('c'), type: 'curve', shape: 'curve', k: -0.6, p: [b[0], b[1]], q: [b[2], b[3]],
+        label: 'U' + ['₀', '₁', '₂'][i], dash: false };
+      model.items.push(last);
+    });
+    sel = last.id; draw();
+    msg('무차별곡선 3개를 놓았습니다 — ● 변형점으로 휨을, 네모로 끝점을 고치세요.', true);
   }
 
   var SUB = ['₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
@@ -740,6 +846,7 @@
     if (drag.handle === 'p') it.p = [r1(now[0]), r1(now[1])];
     else if (drag.handle === 'q') it.q = [r1(now[0]), r1(now[1])];
     else if (drag.handle === 'at') it.at = [r1(now[0]), r1(now[1])];
+    else if (drag.handle === 'm') bendTo(it, now[0], now[1]);
     else if (it.type === 'point' || it.type === 'text') it.at = mv(o.at);
     else if (it.p) { it.p = mv(o.p); it.q = mv(o.q); }
     svgBox.innerHTML = render(model, { live: true, sel: sel });
@@ -908,8 +1015,10 @@
       + '<div class="ge-grid">'
       + '<button type="button" class="ge-btn" data-add="down|0">우하향 직선</button>'
       + '<button type="button" class="ge-btn" data-add="up|0">우상향 직선</button>'
-      + '<button type="button" class="ge-btn" data-add="down|-0.6">우하향 체감<br><small>원점에 볼록</small></button>'
-      + '<button type="button" class="ge-btn" data-add="down|0.6">우하향 체증<br><small>원점에 오목</small></button>'
+      + '<button type="button" class="ge-btn" data-add="down|-0.6|IC">무차별곡선<br><small>원점에 볼록</small></button>'
+      + '<button type="button" class="ge-btn" data-add="down|0.6|PPF">생산가능곡선<br><small>원점에 오목</small></button>'
+      + '<button type="button" class="ge-btn" data-add="ics">무차별곡선 3개<br><small>U₀ U₁ U₂</small></button>'
+      + '<button type="button" class="ge-btn" data-add="down|-0.3">우하향 완만히 볼록</button>'
       + '<button type="button" class="ge-btn" data-add="up|0.6">우상향 체증</button>'
       + '<button type="button" class="ge-btn" data-add="up|-0.6">우상향 체감</button>'
       + '<button type="button" class="ge-btn" data-add="ushape">U자</button>'
@@ -957,9 +1066,11 @@
         else if (a === 'arrow') addArrow();
         else if (a === 'text') addText();
         else if (a === 'vert' || a === 'horiz' || a === 'ushape') addCurve(a, '', 0);
-        else {                                   // "방향|휨" 꼴
+        else if (a === 'ics') addIndifferenceFamily();
+        else {                                   // "방향|휨|이름" 꼴
           var bits = a.split('|');
           addCurve('curve', bits[0], parseFloat(bits[1]) || 0);
+          if (bits[2]) { selected().label = bits[2]; draw(); }
         }
         return;
       }
@@ -1100,7 +1211,8 @@
    */
   var DLG_HTML = ''
     + '<div class="ge-dlg-box">'
-    + '  <div class="ge-dlg-head"><b>그래프 그리기</b>'
+    + '  <div class="ge-dlg-head" title="제목줄을 끌어 창을 옮길 수 있습니다">'
+    + '<span class="ge-grip">⋮⋮</span><b>그래프 그리기</b>'
     + '    <span class="ge-dlg-label"></span>'
     + '    <span class="ge-dlg-btns">'
     + '      <button type="button" class="ge-mini" id="ge-dlg-cancel">취소</button>'
@@ -1114,6 +1226,56 @@
     + '      <div class="ge-sec">놓인 것</div><div id="ge-list"></div></div>'
     + '  </div></div>';
 
+  /** 제목줄을 끌면 창이 따라온다 — 문제를 가리는 자리를 치울 수 있게.
+   *  화면 밖으로 완전히 나가면 되돌릴 방법이 없으므로 제목줄은 늘 화면 안에 남긴다. */
+  function makeDraggable(box, handle) {
+    var dx = 0, dy = 0, on = false;
+
+    function place(x, y) {
+      var w = box.offsetWidth, h = box.offsetHeight;
+      /* 화면 안에 가둔다. 조금이라도 밖으로 내보내면 제목줄의 잡을 자리까지
+         밖으로 나가 **다시 끌어올 수 없는** 창이 된다(실제로 그렇게 물렸다). */
+      x = Math.max(0, Math.min(x, Math.max(0, window.innerWidth - w)));
+      y = Math.max(0, Math.min(y, Math.max(0, window.innerHeight - Math.min(h, 120))));
+      box.style.left = x + 'px';
+      box.style.top = y + 'px';
+    }
+
+    handle.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('button')) return;      // 단추는 단추대로
+      var r = box.getBoundingClientRect();
+      if (!box.classList.contains('ge-moved')) {
+        box.classList.add('ge-moved');
+        box.style.width = r.width + 'px';
+        place(r.left, r.top);
+      }
+      dx = e.clientX - r.left;
+      dy = e.clientY - r.top;
+      on = true;
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', function (e) {
+      if (!on) return;
+      place(e.clientX - dx, e.clientY - dy);
+    });
+    function stop(e) {
+      if (!on) return;
+      on = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+    }
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+
+    // 창을 줄이면 밖으로 나가 있을 수 있다 — 다시 끌어들인다
+    window.addEventListener('resize', function () {
+      if (box.classList.contains('ge-moved')) {
+        var r = box.getBoundingClientRect();
+        place(r.left, r.top);
+      }
+    });
+  }
+
   /** 편집기를 문서 안 대화상자로 띄운다. done(svg, modelJson) 으로 결과를 돌려준다. */
   function openDialog(opt) {
     opt = opt || {};
@@ -1124,6 +1286,7 @@
     document.body.appendChild(back);
     var lab = back.querySelector('.ge-dlg-label');
     if (lab) lab.textContent = opt.label || '';
+    makeDraggable(back.querySelector('.ge-dlg-box'), back.querySelector('.ge-dlg-head'));
 
     var keepHost = host, keepModel = model, keepSel = sel;
     model = blank(); sel = null; undoStack = []; redoStack = [];
@@ -1152,7 +1315,8 @@
       close();
       if (typeof opt.done === 'function') opt.done(svg, json);
     });
-    back.addEventListener('mousedown', function (e) { if (e.target === back) close(); });
+    /* 바깥을 눌러 닫지 않는다 — 막이 없어 '바깥' 이 곧 문제 본문이고,
+       읽으려고 누른 것이 그린 그림을 날리면 안 된다. 닫기는 [취소]·Esc. */
     document.addEventListener('keydown', function esc(e) {
       if (e.key === 'Escape' && document.body.contains(back)) { close(); document.removeEventListener('keydown', esc); }
     });

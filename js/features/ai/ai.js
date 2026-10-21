@@ -39,7 +39,7 @@ function intro() {
     ${searchIndex.ready()
       ? `본문·소제목·태그까지 봅니다 (색인 ${searchIndex.size().toLocaleString()}문서).`
       : '지금은 <b>제목과 경로만</b> 봅니다.'}
-    ${search.hasKey() ? 'AI 답변도 쓸 수 있습니다.'
+    ${search.hasKey() ? 'AI 답변도 쓸 수 있습니다(Vertex · 처음 한 번 사용 동의).'
       : 'AI 답변을 쓰려면 설정에서 키를 넣으세요 — 키 없이도 찾기는 됩니다.'}</p>
     ${searchIndex.ready() ? '' : `<button class="more-btn pressable" data-act="index">
       본문까지 찾도록 색인 받기 (약 5MB · 한 번만)</button>`}`;
@@ -82,6 +82,7 @@ function paint(el) {
         </button>`).join('')}</div>
       <div class="set-actions">
         <button class="more-btn pressable" data-act="gather">근거 모으기 (문서 3편)</button>
+        <button class="more-btn pressable" data-act="tutor">학습 챗봇으로 이어서</button>
         ${search.hasKey() ? `<button class="more-btn pressable" data-act="ask">AI 에게 묻기</button>` : ''}
       </div>
       ${last.context ? `<h3 class="set-sub">모은 근거</h3>
@@ -107,6 +108,11 @@ async function onClick(e, el) {
   }
   const b = e.target.closest('[data-act]');
   if (!b) return;
+
+  if (b.dataset.act === 'tutor') {
+    router.go('#/lib/tutor?mode=ask&topic=' + encodeURIComponent(last.q || ''));
+    return;
+  }
 
   if (b.dataset.act === 'index') {
     b.disabled = true;
@@ -138,6 +144,7 @@ async function onClick(e, el) {
   if (b.dataset.act === 'ask') {
     b.disabled = true; b.textContent = '찾는 중…';
     try {
+      await search.ensureAi();          // ‼ 맨 먼저 — 만료면 이 터치에서 갱신
       if (!last.context) {
         const r = await search.gather(last.q, {
           docs: 3,
@@ -151,8 +158,7 @@ async function onClick(e, el) {
         last.answer = await search.ask(last.q, last.context);
       }
     } catch (err) {
-      if (err.needKey) shell.toast('설정에서 AI 키를 먼저 넣어 주세요');
-      else shell.toast(err.message, 'error');
+      shell.toast(err.message, 'error');
     }
     b.disabled = false; b.textContent = 'AI 에게 묻기';
     paint(el);
