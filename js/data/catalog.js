@@ -27,7 +27,8 @@ const ROOT_NAME = 'Templum';
  *   예를 들어 `_state/*.json`(복습 카드·객관식 은행)은 담기지 않던 시절의 목록이라,
  *   코드를 고쳐도 목록을 다시 받기 전까지는 그 파일을 영영 못 찾는다.
  *   사용자가 "전체 다시 훑기"를 눌러야만 고쳐지는 상태를 남기지 않는다. */
-const CATALOG_EPOCH = 4;   // 4: 새 날짜 폴더가 증분에서 전체 스캔으로 튕기며 빠진 날들을 채운다
+const CATALOG_EPOCH = 5;   // 5: 끊긴 스캔 위에 증분이 덮여 굳은 반쪽 목록을 한 번 전부 다시 받는다(2026-10-28)
+                           // 4: 새 날짜 폴더가 증분에서 전체 스캔으로 튕기며 빠진 날들을 채운다
                            //    (3: 증분이 `_state/*.json` 을 버리던 것을 고침)
 
 /* 폴더가 '우리 목록보다 나중에 생겼나'를 볼 때 두는 여유 — 시계 차이·업로드 지연
@@ -255,7 +256,15 @@ async function applyChanges(entries) {
     }
     if (!f) continue;
     if (f.mimeType === 'application/vnd.google-apps.folder') {
-      if (folderMap[id]) return false;         // 알던 폴더의 이름변경·이동 → 하위 경로 전부 영향
+      const known = folderMap[id];
+      if (known) {
+        /* ‼ 알던 폴더가 변경 목록에 **이름·부모 그대로** 다시 오르는 일은 흔하다(안에 문서가
+           새로 들어올 때 등). 옛 코드는 이것도 '이름변경·이동'으로 보고 전체 스캔으로 넘겼다 —
+           백과 문서가 하루 수십 편씩 올라오자 전체 스캔이 잦아졌고, 그 스캔이 끊기며 목록이
+           반쪽이 됐다(2026-10-28 인문학이 철학만 보여 자동으로 들어가 버림). */
+        if (known.name === f.name && known.parentId === (f.parents?.[0] || null)) continue;
+        return false;                          // 진짜 이름변경·이동 → 하위 경로 전부 영향
+      }
       const parent = await resolvePath(f.parents?.[0] || null);
       if (parent === null) continue;           // Templum 밖 — 우리와 무관
       /* ‼ **갓 만들어진** 폴더는 전체 스캔까지 갈 일이 아니다.
@@ -306,8 +315,14 @@ export async function refresh({ force = false, onProgress } = {}) {
     if (!rootId) rootId = await api.findFolderByName(ROOT_NAME, null);
 
     // 옛 규칙으로 만든 목록이면 증분으로 고칠 수 없다 — 한 번은 전체를 받아야 한다
-    const cursor = (force || staleEpoch) ? null : kv.get(CHANGES_TOKEN);
+    /* ‼ 하다 만 전체 스캔이 있으면 증분보다 그것을 먼저 잇는다. 끊긴 스캔은 반쪽 목록을
+       공개해 두는데, 그 위에 증분이 성공하면 커서만 앞으로 가고 반쪽 목록이 굳어 버린다
+       (빠진 폴더는 변경 목록에 다시 안 나오므로 영영 안 채워진다). */
+    const pending = await idb.get('catalog', SCAN_KEY).catch(() => null);
+    const scanPending = !!(pending && Array.isArray(pending.stack) && pending.stack.length);
+    const cursor = (force || staleEpoch || scanPending) ? null : kv.get(CHANGES_TOKEN);
     if (staleEpoch) log.info('catalog', '목록 형식이 바뀌어 전체를 다시 받습니다');
+    else if (scanPending) log.info('catalog', '끊긴 전체 스캔을 이어서 합니다');
     if (cursor && allFiles.length) {
       try {
         const { entries, newToken } = await api.fetchChanges(cursor);
