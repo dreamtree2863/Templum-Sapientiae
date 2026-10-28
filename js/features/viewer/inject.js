@@ -32,6 +32,14 @@ img, svg, video, canvas { max-width: 100%; height: auto; }
 body { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important; }
 /* 손가락으로 답안칸을 누르기 쉽게 — 최소 높이만 보장하고 문서 조판은 그대로 */
 .write { min-height: max(var(--lines, 2) * 1.9em, 56px); }
+/* 백과 정보상자(.infobox — 파이프라인 문서 147편, float:right 270px) 는 세로 화면에서
+   본문 칸을 거의 0 으로 만들어 첫 문단이 한 글자씩 줄바꿈됐다(412px 폭: 본문 칸 18px).
+   좁은 화면에서는 상자를 본문 위 한 덩어리로 내리고, 그 문서의 큰 여백(좌우 50px)도 줄인다. */
+@media (max-width: 600px) {
+  .infobox { float: none !important; width: auto !important; max-width: 100% !important; margin: 4px 0 16px !important; }
+  body:has(.infobox) { margin: 0 !important; padding-left: 16px !important; padding-right: 16px !important;
+                       padding-top: 20px !important; border-radius: 0 !important; }
+}
 `;
 
 /** iframe 문서(같은 출처)에 <head> 를 채운다. frame.onload 이후에 부른다. */
