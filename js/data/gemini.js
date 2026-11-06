@@ -12,7 +12,7 @@ import * as auth from './auth.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export const PROJECT = () => kv.get('ai.vertex.project') || 'tts3-507713';
+export const PROJECT = () => kv.get('ai.vertex.project') || 'cloud286';   // 2026-11-06 dreamtree286 계정 프로젝트(이전 tts3-507713)
 const LOCATION = 'global';
 export const LIVE_LOCATION = 'us-central1';       // Live 는 지역 엔드포인트만 있다
 
