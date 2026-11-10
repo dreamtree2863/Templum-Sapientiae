@@ -26,8 +26,8 @@ const CLIENT_ID = '113629352800-he0vmc6f2m3f3vn5clr968db12sf6t4u.apps.googleuser
 export const SCOPE_READ = 'https://www.googleapis.com/auth/drive.readonly';
 /** 쓰기 — 4단계(폰→PC)에서 처음 켤 때만 더 요청한다. 앱이 만든 파일만 건드리는 비민감 스코프. */
 export const SCOPE_WRITE = 'https://www.googleapis.com/auth/drive.file';
-/** AI — Vertex AI(tts3 클라우드 크레딧)로 Gemini 를 부를 때만. 처음 AI 를 쓸 때 한 번 동의(2026-10-21).
- *  AI Studio 키(선불 크레딧)는 소진(402)돼 더 쓰지 않는다. 계정 dreamtree2863 에 tts3 'Vertex AI 사용자' 역할이 있다. */
+/** AI — Vertex AI(클라우드 크레딧)로 Gemini 를 부를 때만. 처음 AI 를 쓸 때 한 번 동의(2026-10-21).
+ *  AI Studio 키(선불 크레딧)는 소진(402)돼 더 쓰지 않는다. 계정 dreamtree2863 에 project-9c05e4f8-106a-4325-aae(dreamtree109) 'Vertex AI 사용자' 역할이 있다. */
 export const SCOPE_CLOUD = 'https://www.googleapis.com/auth/cloud-platform';
 
 const TOKEN_KEY = 'auth.v2';          // {token, expiresAt, scopes[]}
