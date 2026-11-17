@@ -79,6 +79,61 @@ export async function uploadText(folderId, name, text, mime = 'application/json'
   return resp.json();
 }
 
+/**
+ * 이진 파일(사진·PDF)을 올린다. 반환 {id, name, size}.
+ *
+ * 재개형(resumable) 업로드: 세션을 연 뒤 본문을 PUT 한다 — 스캔 PDF 는 수십 MB 가 될 수
+ * 있어 multipart(5MB 권장)로는 불안하다. 세션 주소(Location)를 못 읽는 환경이면 multipart 로.
+ * ‼ X-Upload-* 같은 비표준 헤더는 붙이지 않는다(교차 출처 사전요청 함정 — uploadText 주석).
+ */
+export async function uploadBlob(folderId, name, blob, mime) {
+  const meta = { name, mimeType: mime, parents: folderId ? [folderId] : undefined };
+  let session = '';
+  try {
+    const init = await fetch(UPLOAD + '?uploadType=resumable&fields=id,name,size', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + _getToken(), 'Content-Type': 'application/json; charset=UTF-8' },
+      body: JSON.stringify(meta),
+    });
+    if (!init.ok) throw await errorOf(init);
+    session = init.headers.get('Location') || init.headers.get('location') || '';
+  } catch (e) {
+    if (e.status) throw e;          // 권한·할당량 오류는 그대로 알린다
+    log.warn('drive', '재개형 세션 실패 — multipart 로', e);
+  }
+  if (session) {
+    let lastErr = null;
+    for (let i = 0; i < 3; i++) {   // 끊기면 같은 세션으로 다시(본문 통째로 — 사진 몇 MB 라 충분)
+      try {
+        const resp = await fetch(session, { method: 'PUT', headers: { 'Content-Type': mime }, body: blob });
+        if (resp.ok) return resp.json();
+        lastErr = await errorOf(resp);
+        if (resp.status < 500) throw lastErr;
+      } catch (e) {
+        lastErr = e;
+        if (e.status && e.status < 500) throw e;
+      }
+      await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+    }
+    throw lastErr || new Error('업로드 실패');
+  }
+  log.warn('drive', '세션 주소를 못 받아 multipart 로 올림');
+  const boundary = 'tpl' + Math.random().toString(36).slice(2);
+  const body = new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n`
+    + `--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`,
+    blob,
+    `\r\n--${boundary}--\r\n`,
+  ]);
+  const resp = await fetch(UPLOAD + '?uploadType=multipart&fields=id,name,size', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + _getToken(), 'Content-Type': 'multipart/related; boundary=' + boundary },
+    body,
+  });
+  if (!resp.ok) throw await errorOf(resp);
+  return resp.json();
+}
+
 export async function remove(fileId) {
   const resp = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(fileId), {
     method: 'DELETE',

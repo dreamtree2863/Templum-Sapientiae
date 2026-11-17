@@ -89,7 +89,8 @@ export async function open(fileId, params = {}) {
              ${sib.toc ? '<option value="toc">📑 모범 목차</option>' : ''}
            </select>
            <button class="btn-primary pressable" id="w-grade">🧮 채점</button>`
-        : `<button class="btn-primary pressable" id="w-send">📤 PC로 보내기</button>`}
+        : `<button class="pressable write-scan" id="w-scan" title="종이에 쓴 답안을 찍어 보냅니다">📷 종이 답안</button>
+           <button class="btn-primary pressable" id="w-send">📤 PC로 보내기</button>`}
     </div>
     <div id="w-result" class="write-result" hidden></div>`;
   shell.render({ title: info.baseTitle || file.name, back: true, node: el });
@@ -150,6 +151,7 @@ export async function open(fileId, params = {}) {
   }
 
   el.querySelector('#w-send')?.addEventListener('click', sendAnswer);
+  el.querySelector('#w-scan')?.addEventListener('click', () => router.go('#/scan?problem=' + encodeURIComponent(file.id)));
   el.querySelector('#w-grade')?.addEventListener('click', runGrade);
   if (mode === 'toc' && !sib.rubric && !sib.toc) {
     el.querySelector('#w-grade').disabled = true;

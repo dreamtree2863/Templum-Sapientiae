@@ -54,6 +54,7 @@ body.writing #main { padding: 0; }
   background: var(--navy); color: #fff; font-weight: 700; font-size: 14px; font-family: inherit;
 }
 .btn-primary:disabled { opacity: .5; }
+.write-scan { border: 1px solid var(--rule); border-radius: 10px; padding: 0 12px; min-height: var(--tap); background: var(--surface); color: var(--ink); font-size: 13.5px; font-family: inherit; }
 
 /* 채점 결과 — 편집기 위에 뜨는 시트 */
 .write-result {

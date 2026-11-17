@@ -21,6 +21,7 @@ import * as mcqUi from './features/mcq/mcq.js';
 import * as aiUi from './features/ai/ai.js';
 import * as writeUi from './features/write/write.js';
 import * as tutorUi from './features/tutor/tutor.js';
+import * as scanUi from './features/scan/scan.js';
 
 const THEME_KEY = 'ui.theme';
 const SCALE_KEY = 'ui.textScale';
@@ -65,6 +66,8 @@ function routes() {
   router.route('#/doc/:id', ({ id }) => viewer.open(id));
   // 답안·목차 쓰기 — #/write/<문제 id>?mode=answer|toc
   router.route('#/write/:id', ({ id }) => writeUi.open(id, router.query()));
+  // 스캔 — #/scan(일반 문서) · #/scan?problem=<문제 id>(손글씨 답안 → PC 채점)
+  router.route('#/scan', () => scanUi.open(router.query()));
 
   router.setNotFound(() => router.go('#/', { replace: true }));
 
@@ -72,6 +75,7 @@ function routes() {
   window.addEventListener('hashchange', () => {
     if (!location.hash.startsWith('#/doc/')) viewer.close();
     if (!location.hash.startsWith('#/write/')) writeUi.close();
+    if (!location.hash.startsWith('#/scan')) scanUi.leave();
   });
 }
 

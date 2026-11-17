@@ -159,6 +159,9 @@ const HUBS = {
       // 학습지 너머 — 논술 답안(시험)과 목차 퀴즈. 문제를 고르면 쓰기 화면으로(features/write)
       { ico: '🖋️', label: '답안 쓰기', sub: '시험처럼 — PC에서 채점', go: '#/lib/docs?kind=q_only&pick=answer' },
       { ico: '📑', label: '목차 퀴즈', sub: '폰에서 바로 채점', go: '#/lib/docs?kind=q_only&pick=toc' },
+      // 📷 스캔(features/scan) — 원본 화질로 펴서 Drive 스캔/ 에 사진+PDF
+      { ico: '📷', label: '답안 스캔', sub: '종이 답안 → PC 채점', go: '#/lib/docs?kind=q_only&pick=scan' },
+      { ico: '🗂️', label: '문서 스캔', sub: '찍어서 PDF → Drive', go: '#/scan' },
     ],
   },
   review: {

@@ -54,6 +54,7 @@ export function renderList(params = {}) {
 function titleOf(q) {
   if (q.pick === 'answer') return '답안 쓰기 — 문제 고르기';
   if (q.pick === 'toc') return '목차 퀴즈 — 문제 고르기';
+  if (q.pick === 'scan') return '답안 스캔 — 문제 고르기';
   if (q.kind === 'recall') return '백지 인출';
   if (q.kind === 'quiz') return '복기 퀴즈';
   if (q.kind === 'news') return '뉴스 요약';
@@ -169,6 +170,7 @@ function onClick(e, el) {
     const f = catalog.byId(doc.dataset.doc);
     if (f) markOpened(f);
     // 답안·목차 쓰기에서 온 목록이면 문서 대신 쓰기 화면으로
+    if (q.pick === 'scan') { router.go('#/scan?problem=' + encodeURIComponent(doc.dataset.doc)); return; }
     if (q.pick) { router.go('#/write/' + encodeURIComponent(doc.dataset.doc) + '?mode=' + q.pick); return; }
     router.go('#/doc/' + encodeURIComponent(doc.dataset.doc));
   }

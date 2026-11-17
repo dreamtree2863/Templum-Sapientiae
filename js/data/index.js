@@ -28,11 +28,12 @@ import * as searchIndex from './searchindex.js';
 import * as gemini from './gemini.js';
 import * as tutor from './tutor.js';
 import * as live from './live.js';
+import * as scans from './scans.js';
 import * as idb from '../core/idb.js';
 import * as kv from '../core/kv.js';
 import * as log from '../core/log.js';
 
-export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, search, searchIndex, log, gradeToc, gemini, tutor, live };
+export { auth, catalog, classify, docContent, docRules, audio, answers, outbox, uplink, review, mcq, search, searchIndex, log, gradeToc, gemini, tutor, live, scans };
 
 /** 앱이 처음 뜰 때 한 번. 반환 {signedIn, offline, cached} */
 export async function boot() {

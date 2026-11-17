@@ -1,0 +1,72 @@
+/* scan.css — 문서·답안 스캔 (features/scan) */
+
+body.scanning #tabbar { display: none; }
+body.scanning #main { padding: 0; }
+
+.scan-wrap {
+  position: fixed; left: 0; right: 0;
+  top: calc(var(--topbar-h) + var(--safe-t)); bottom: 0;
+  display: flex; flex-direction: column; background: var(--bg);
+}
+.scan-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--rule); background: var(--surface-2); }
+.scan-prob { display: flex; flex-direction: column; gap: 2px; color: var(--ink); font-size: 15px; }
+.scan-prob span { color: var(--ink-3); font-size: 12px; }
+.scan-title {
+  width: 100%; box-sizing: border-box; font-size: 15px; padding: 9px 10px; font-family: inherit;
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); color: var(--ink);
+}
+.scan-tip { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+
+.scan-pages {
+  flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-content: start;
+}
+.scan-empty { grid-column: 1 / -1; text-align: center; color: var(--ink-2); padding: 48px 12px; line-height: 1.8; }
+.scan-empty small { color: var(--ink-3); }
+.scan-page { display: flex; flex-direction: column; gap: 6px; }
+.scan-thumb {
+  position: relative; padding: 0; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden;
+  background: #ddd; aspect-ratio: 1 / 1.414; display: flex; align-items: center; justify-content: center;
+}
+.scan-thumb img { max-width: 100%; max-height: 100%; display: block; }
+.scan-no {
+  position: absolute; left: 6px; top: 6px; min-width: 22px; padding: 2px 6px; border-radius: 11px;
+  background: rgba(0,0,0,.65); color: #fff; font-size: 12px; font-weight: 700;
+}
+.scan-page-bar { display: flex; gap: 4px; }
+.scan-page-bar button {
+  flex: 1; min-height: 34px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface);
+  color: var(--ink); font-size: 13px; font-family: inherit; padding: 0 4px;
+}
+.scan-page-bar button:first-child { flex: 2; }
+.scan-page-bar button:disabled { opacity: .35; }
+
+.scan-actions {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px calc(8px + var(--safe-b));
+  border-top: 1px solid var(--rule); background: var(--surface-2);
+}
+.scan-actions > * { white-space: nowrap; flex: 0 0 auto; }
+.scan-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap); padding: 0 11px;
+  border-radius: 10px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  font-size: 14px; font-weight: 700;
+}
+.scan-actions select { font-size: 13px; padding: 8px 6px; border-radius: 8px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
+.scan-actions .btn-primary { margin-left: auto; padding: 10px 12px; }
+
+/* 자르기 — 화면 전체 */
+.scan-edit { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; background: #111; color: #eee; }
+.scan-edit-stage { position: relative; flex: 1 1 auto; min-height: 0; touch-action: none; }
+.scan-edit-stage canvas#se-cv { position: absolute; inset: 0; touch-action: none; }
+.scan-loupe {
+  position: absolute; top: 12px; width: 120px; height: 120px; border-radius: 50%;
+  border: 3px solid #fff; box-shadow: 0 2px 10px rgba(0,0,0,.6); pointer-events: none;
+}
+.scan-edit-info { padding: 6px 12px; font-size: 12.5px; color: #bbb; text-align: center; }
+.scan-edit-bar { display: flex; gap: 6px; align-items: center; padding: 8px 8px calc(10px + var(--safe-b)); background: #1c1c1c; }
+.scan-edit-bar button {
+  white-space: nowrap; flex: 0 0 auto;
+  min-height: var(--tap); padding: 0 10px; border-radius: 10px; border: 1px solid #444;
+  background: #2a2a2a; color: #eee; font-size: 14px; font-family: inherit;
+}
+.scan-edit-bar .btn-primary { background: var(--navy); border: 0; color: #fff; }

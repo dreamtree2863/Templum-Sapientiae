@@ -408,6 +408,26 @@ export async function cloudToken() {
   throw e;
 }
 
+/** Drive 에 파일을 올리기 직전(스캔 보내기). 버튼 처리기 **맨 앞**에서 — 갱신 팝업이 터치 안에서 열리게.
+ *  신선한 쓰기 토큰이면 바로, 아니면 갱신·동의를 열고 기다린다. 반환 토큰, 실패하면 예외. */
+export async function writeToken() {
+  if (writeFresh()) return token;
+  if (!tokenClient) throw new Error('로그인 준비가 안 됐습니다 — 연결을 확인해 주세요');
+  const waiting = waitForToken(90_000);
+  if (!hasScope(SCOPE_WRITE)) {
+    signIn({ scope: [SCOPE_READ, SCOPE_WRITE].concat(hasCloud() ? [SCOPE_CLOUD] : []).join(' ') });
+  } else {
+    writeWanted = true;
+    if (!renewing) {
+      renewing = true; silentTried = true;
+      try { tokenClient.requestAccessToken(withHint({ prompt: '' })); } catch (e) { renewing = false; }
+    }
+  }
+  await waiting;
+  if (writeFresh()) return token;
+  throw new Error('Drive 쓰기 연결이 안 됐습니다 — 한 번 더 눌러 주세요');
+}
+
 /** 4단계에서 쓰기 권한이 필요해질 때. */
 export function ensureWriteScope() {
   if (hasScope(SCOPE_WRITE)) return true;
